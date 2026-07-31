@@ -54,13 +54,14 @@ flowchart TD
         LocalStorage[MyCloud File Storage]
     end
 
-    UI <-->|HTTP REST Requests| API
-    Broadcaster <-->|WebRTC Signaling Events| SocketServer
-    Broadcaster <==>|Peer-to-Peer Stream (STUN)| UI
-    MediaRec -->|POST /api/recordings| API
-    API --> Multer --> LocalStorage
-    AuthModule <-->|SQL Queries| DB
-    API <-->|SQL Queries| DB
+    UI <-->|"HTTP REST Requests"| API
+    Broadcaster <-->|"WebRTC Signaling Events"| SocketServer
+    Broadcaster <-->|"Peer-to-Peer Stream (STUN)"| UI
+    MediaRec -->|"POST /api/recordings"| API
+    API --> Multer
+    Multer --> LocalStorage
+    AuthModule <-->|"SQL Queries"| DB
+    API <-->|"SQL Queries"| DB
 ```
 
 ### WebRTC Signaling Sequence Diagram
@@ -224,35 +225,6 @@ myCam/
 | **Database Engine** | MySQL 8.0+ |
 | **Password Hashing** | Werkzeug-compatible Node `crypto.scrypt` & `pbkdf2:sha256` |
 | **WebRTC Signaling** | STUN Server (`stun:stun.l.google.com:19302`) + Socket.IO |
-
----
-
-## Screenshots
-
-*(Placeholders - replace with actual application screenshots upon deployment)*
-
-```text
-+-----------------------------------------------------------------------+
-|  [ LANDING PAGE MOCKUP ]                                              |
-|  myCam: Real-Time Security Surveillance & WebRTC Camera Platform      |
-|  [ Get Started ] [ Sign In ]                                          |
-+-----------------------------------------------------------------------+
-
-+-----------------------------------------------------------------------+
-|  [ DASHBOARD CAMERA GRID MOCKUP ]                                     |
-|  +------------------------+  +------------------------+               |
-|  | CAM-MOBILE (LIVE STREAM|  | CAM-02 (Kitchen)       |               |
-|  | [WebRTC Feed Active]   |  | [Offline Placeholder]  |               |
-|  +------------------------+  +------------------------+               |
-+-----------------------------------------------------------------------+
-
-+-----------------------------------------------------------------------+
-|  [ ACTIVITY ZONES CANVAS EDITOR MOCKUP ]                              |
-|  +-----------------------------------------------------------------+  |
-|  | [ Canvas Area: Polygonal Motion Detection Zone Layer (Green) ] |  |
-|  +-----------------------------------------------------------------+  |
-+-----------------------------------------------------------------------+
-```
 
 ---
 
