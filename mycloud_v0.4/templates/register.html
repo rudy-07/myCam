@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Register - myCloud</title>
+    <script src="{{ url_for('static', filename='theme.js', v='3') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='login.css', v='3') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="login-container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="messages">
+            {% for category, message in messages %}
+            <div class="message {{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+        <h2>Create a myCloud Account</h2>
+        <form action="/register" method="post">
+            
+            <div class="password-wrapper">
+                <input type="text" name="name" placeholder="Name" required>
+            </div>
+
+            <div class="password-wrapper">
+                <input type="text" name="username" id="username-input" placeholder="Username" required autocomplete="off">
+                <span id="username-status" class="validation-status"></span>
+            </div>
+            <div id="username-suggestions"></div>
+
+            <div class="password-wrapper">
+                <input type="email" name="email" id="email-input" placeholder="Email" required autocomplete="off">
+                <span id="email-status" class="validation-status"></span>
+            </div>
+
+            <div class="password-wrapper">
+                <input type="password" name="password" id="password-input" placeholder="Password" required>
+                <i class="fas fa-magic suggest-password-icon" title="Suggest Strong Password"></i>
+                <i class="fas fa-eye toggle-password"></i>
+            </div>
+
+            <!-- Removed old label container with text button -->
+            
+            <ul id="password-checklist">
+                <li id="length">At least 8 characters</li>
+                <li id="uppercase">At least one uppercase letter</li>
+                <li id="lowercase">At least one lowercase letter</li>
+                <li id="number">At least one number</li>
+                <li id="special">At least one special character</li>
+            </ul>
+
+            <div class="password-wrapper">
+                <input type="password" name="confirm_password" id="confirm-password-input" placeholder="Confirm Password" required>
+                <span id="password-match-status" class="validation-status"></span>
+                <i class="fas fa-eye toggle-password"></i>
+            </div>
+            <button type="submit">Register</button>
+        </form>
+
+        <a href="{{ url_for('google_login') }}" class="google-btn">Register with Google</a>
+        <a href="{{ url_for('github_login') }}" class="github-btn">Register with GitHub</a>
+        
+        <p>Already have an account? <a href="{{ url_for('login') }}">Login here</a></p>
+    </div>
+
+    <script>
+        // --- FIXED: Restored Password Toggle Script with Icons ---
+        document.querySelectorAll('.toggle-password').forEach(icon => {
+            icon.addEventListener('click', function () {
+                // Find the input field relative to the icon.
+                // Since the eye icon might be after a span in confirm password, we look for the input in parent.
+                const wrapper = this.closest('.password-wrapper');
+                const passwordInput = wrapper.querySelector('input');
+                
+                if (passwordInput.type === 'password') {
+                    passwordInput.type = 'text';
+                    this.classList.remove('fa-eye');
+                    this.classList.add('fa-eye-slash');
+                } else {
+                    passwordInput.type = 'password';
+                    this.classList.remove('fa-eye-slash');
+                    this.classList.add('fa-eye');
+                }
+            });
+        });
+
+        // --- ADDED: Strong Password Generation Logic ---
+        // Suggestion Icon Logic
+        const suggestIcons = document.querySelectorAll('.suggest-password-icon');
+        const passwordInput = document.getElementById('password-input');
+        const confirmPasswordInput = document.getElementById('confirm-password-input');
+
+        function generateStrongPassword() {
+            const length = 12; // Generate a 12-character password for extra security
+            const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+            const lower = 'abcdefghijklmnopqrstuvwxyz';
+            const numbers = '0123456789';
+            const symbols = '!@#$%^&*()_+~`|}{[]:;?><,./-=';
+            
+            const allChars = upper + lower + numbers + symbols;
+            
+            let password = '';
+            // Ensure at least one of each required character type
+            password += upper[Math.floor(Math.random() * upper.length)];
+            password += lower[Math.floor(Math.random() * lower.length)];
+            password += numbers[Math.floor(Math.random() * numbers.length)];
+            password += symbols[Math.floor(Math.random() * symbols.length)];
+            
+            // Fill the rest of the password length with random characters
+            for (let i = password.length; i < length; i++) {
+                password += allChars[Math.floor(Math.random() * allChars.length)];
+            }
+            
+            // Shuffle the password string to make the first 4 characters random
+            return password.split('').sort(() => 0.5 - Math.random()).join('');
+        }
+        
+        // Attach listener to all suggest icons (though likely only one)
+        suggestIcons.forEach(icon => {
+            icon.addEventListener('click', function() {
+                const newPassword = generateStrongPassword();
+                
+                // Set the value for both password fields
+                if(passwordInput) passwordInput.value = newPassword;
+                if(confirmPasswordInput) confirmPasswordInput.value = newPassword;
+                
+                // Manually trigger the 'input' event to update the checklist
+                if(passwordInput) passwordInput.dispatchEvent(new Event('input'));
+                if(confirmPasswordInput) confirmPasswordInput.dispatchEvent(new Event('input'));
+            });
+        });
+
+        // --- FIXED: Restored Password Validation Script ---
+        const checklist = document.getElementById('password-checklist');
+        const lengthCheck = document.getElementById('length');
+        const uppercaseCheck = document.getElementById('uppercase');
+        const lowercaseCheck = document.getElementById('lowercase');
+        const numberCheck = document.getElementById('number');
+        const specialCheck = document.getElementById('special');
+
+        passwordInput.addEventListener('focus', function() {
+            checklist.style.display = 'block';
+        });
+
+        passwordInput.addEventListener('blur', function() {
+            if (this.value === '') {
+                checklist.style.display = 'none';
+            }
+        });
+
+        passwordInput.addEventListener('input', function() {
+            const password = this.value;
+            lengthCheck.classList.toggle('valid', password.length >= 8);
+            uppercaseCheck.classList.toggle('valid', /[A-Z]/.test(password));
+            lowercaseCheck.classList.toggle('valid', /[a-z]/.test(password));
+            numberCheck.classList.toggle('valid', /\d/.test(password));
+            specialCheck.classList.toggle('valid', /[!@#$%^&*(),.?":{}|<>]/.test(password));
+        });
+
+        // --- Real-time Username and Email Validation ---
+        const usernameInput = document.getElementById('username-input');
+        const usernameStatus = document.getElementById('username-status');
+        const emailInput = document.getElementById('email-input');
+        const emailStatus = document.getElementById('email-status');
+        const usernameSuggestions = document.getElementById('username-suggestions');
+
+        function debounce(func, delay) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), delay);
+            };
+        }
+
+        const checkUsername = async (username) => {
+            usernameSuggestions.innerHTML = '';
+            if (username.length < 3) {
+                usernameStatus.textContent = '';
+                return;
+            }
+            const response = await fetch('/check_username', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username })
+            });
+            const data = await response.json();
+            if (data.available) {
+                usernameStatus.textContent = 'Available';
+                usernameStatus.className = 'validation-status available';
+            } else {
+                usernameStatus.textContent = 'Taken';
+                usernameStatus.className = 'validation-status taken';
+                const suggestionsResponse = await fetch('/suggest_username', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: username })
+                });
+                const suggestionsData = await suggestionsResponse.json();
+                if (suggestionsData.suggestions && suggestionsData.suggestions.length > 0) {
+                    let suggestionsHTML = 'Suggestions: ';
+                    suggestionsData.suggestions.forEach(sugg => {
+                        suggestionsHTML += `<a href="#" class="suggestion-link">${sugg}</a>`;
+                    });
+                    usernameSuggestions.innerHTML = suggestionsHTML;
+                }
+            }
+        };
+
+        const checkEmail = async (email) => {
+            const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailPattern.test(email)) {
+                emailStatus.textContent = '';
+                return;
+            }
+            const response = await fetch('/check_email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email })
+            });
+            const data = await response.json();
+            if (data.available) {
+                emailStatus.textContent = 'Available';
+                emailStatus.className = 'validation-status available';
+            } else {
+                emailStatus.textContent = 'Taken';
+                emailStatus.className = 'validation-status taken';
+            }
+        };
+
+        usernameInput.addEventListener('input', debounce((e) => {
+            checkUsername(e.target.value);
+        }, 500));
+        
+        emailInput.addEventListener('input', debounce((e) => {
+            checkEmail(e.target.value);
+        }, 500));
+
+        usernameSuggestions.addEventListener('click', function(e) {
+            if (e.target.classList.contains('suggestion-link')) {
+                e.preventDefault();
+                const suggestedName = e.target.textContent;
+                usernameInput.value = suggestedName;
+                checkUsername(suggestedName);
+            }
+        });
+
+        // --- START: Live Password Matching ---
+        const passwordMatchStatus = document.getElementById('password-match-status');
+
+        function validatePasswordMatch() {
+            const password = passwordInput.value;
+            const confirmPassword = confirmPasswordInput.value;
+
+            if (confirmPassword.length > 0) {
+                if (password === confirmPassword) {
+                    passwordMatchStatus.textContent = 'Passwords Match';
+                    passwordMatchStatus.className = 'validation-status available'; // Green text
+                } else {
+                    passwordMatchStatus.textContent = 'Passwords Do Not Match';
+                    passwordMatchStatus.className = 'validation-status taken'; // Red text
+                }
+            } else {
+                passwordMatchStatus.textContent = '';
+            }
+        }
+
+        // Add event listeners to both password fields
+        passwordInput.addEventListener('input', validatePasswordMatch);
+        confirmPasswordInput.addEventListener('input', validatePasswordMatch);
+        // --- END: Live Password Matching ---
+    </script>
+</body>
+</html>

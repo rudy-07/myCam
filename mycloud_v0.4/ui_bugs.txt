@@ -1,0 +1,5 @@
+- Kebab menu - brief jump when opened
+
+
+- Show/Hide toggle and suggest password fill needs animation while entering password in all pages that have password field
+- Drag and drop of files to folder within the site needs the option to confirm move/drop and an option within that modal to dont ask again which if selected wont ask again for that session

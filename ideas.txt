@@ -1,0 +1,1 @@
+- Active cameras - clicking on it would enlarge/make a new modal or open in a new page with all the features.
