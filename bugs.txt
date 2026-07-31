@@ -1,1 +1,0 @@
-- "Download" text on the button is light as well as the button so its not visible
