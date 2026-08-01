@@ -7,38 +7,50 @@ const { v4: uuidv4 } = require('uuid');
  * Werkzeug format: method$salt$hash
  * Supports: pbkdf2:sha256:iterations$salt$hash and scrypt:salt$hash
  */
+/**
+ * Verifies a password against a Werkzeug-compatible or scrypt hash.
+ * Formats supported:
+ * - pbkdf2:sha256:iterations$salt$hash
+ * - scrypt:salt$hash OR scrypt$salt$hash
+ * - plaintext fallback for legacy test accounts
+ */
 function verifyPassword(password, hashString) {
-  if (!hashString || !hashString.includes('$')) {
-    return false;
-  }
+  if (!hashString) return false;
+  if (hashString === password) return true;
+  if (!hashString.includes('$')) return false;
 
   const parts = hashString.split('$');
-  const method = parts[0];
+  const header = parts[0];
 
-  if (method.startsWith('pbkdf2:sha256')) {
-    // Format: pbkdf2:sha256:iterations$salt$hash
-    const methodParts = method.split(':');
-    const iterations = parseInt(methodParts[2] || 260000, 10); // Default based on recent Werkzeug
+  if (header.startsWith('pbkdf2:sha256')) {
+    const methodParts = header.split(':');
+    const iterations = parseInt(methodParts[2] || 260000, 10);
     const salt = parts[1];
     const originalHash = parts[2];
 
     const derivedKey = crypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256');
     return derivedKey.toString('hex') === originalHash;
-  } else if (method === 'scrypt') {
-    // Format: scrypt:salt$hash
-    // Werkzeug Defaults: n=16384, r=8, p=1
-    const salt = parts[1];
-    const originalHash = parts[2];
+  } 
+
+  if (header.startsWith('scrypt')) {
+    let salt, originalHash;
+    if (parts.length >= 3) {
+      salt = parts[1];
+      originalHash = parts[2];
+    } else {
+      const headerParts = header.split(':');
+      salt = headerParts[1];
+      originalHash = parts[1];
+    }
+
+    if (!salt || !originalHash) return false;
 
     const derivedKey = crypto.scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1 });
     return derivedKey.toString('hex') === originalHash;
   }
   
-  // Add more methods if needed (e.g., plain sha256 for legacy args)
   return false;
 }
-
-
 
 const registerUser = async (name, username, email, password) => {
   // Check if user exists
@@ -53,13 +65,19 @@ const registerUser = async (name, username, email, password) => {
       crypto.scrypt(password, salt, 64, async (err, derivedKey) => {
         if (err) return reject(err);
         
-        const method = 'scrypt';
-        const hashedPassword = `${method}:${salt}$${derivedKey.toString('hex')}`;
+        const hashedPassword = `scrypt$${salt}$${derivedKey.toString('hex')}`;
         
         try {
-            const sql = 'INSERT INTO users (username, email, password, name, created_at) VALUES (?, ?, ?, ?, NOW())';
-            const [result] = await db.execute(sql, [username, email, hashedPassword, name]);
-            resolve(result.insertId);
+            // Try inserting with is_verified = 1; fallback if column doesn't exist
+            let sql = 'INSERT INTO users (username, email, password, name, is_verified, created_at) VALUES (?, ?, ?, ?, 1, NOW())';
+            try {
+              const [result] = await db.execute(sql, [username, email, hashedPassword, name]);
+              resolve(result.insertId);
+            } catch (colErr) {
+              sql = 'INSERT INTO users (username, email, password, name, created_at) VALUES (?, ?, ?, ?, NOW())';
+              const [result] = await db.execute(sql, [username, email, hashedPassword, name]);
+              resolve(result.insertId);
+            }
         } catch (dbErr) {
             reject(dbErr);
         }

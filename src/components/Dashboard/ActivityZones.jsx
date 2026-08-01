@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Camera, Plus, Trash2, Save, Undo, MousePointer2 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
+import { API_BASE } from '../../config';
 
 const ActivityZones = ({ user }) => {
   const { addToast } = useToast();
@@ -17,7 +18,7 @@ const ActivityZones = ({ user }) => {
   const fetchZones = async () => {
       if (!user) return;
       try {
-          const res = await fetch(`http://localhost:3000/api/zones?user_id=${user.id}`);
+          const res = await fetch(`${API_BASE}/api/zones?user_id=${user.id}`);
           if (!res.ok) {
               console.warn('Failed to fetch zones, status:', res.status);
               return; // Stop if failed
@@ -48,8 +49,11 @@ const ActivityZones = ({ user }) => {
 
       // Draw existing zones for this camera
       zones.filter(z => z.camera_id === selectedCamera).forEach(zone => {
-          const coords = zone.coordinates_json;
-          if (coords.length > 0) {
+          let coords = zone.coordinates_json;
+          if (typeof coords === 'string') {
+              try { coords = JSON.parse(coords); } catch (e) { coords = []; }
+          }
+          if (Array.isArray(coords) && coords.length > 0) {
               ctx.beginPath();
               ctx.moveTo(coords[0].x * canvas.width, coords[0].y * canvas.height);
               for (let i = 1; i < coords.length; i++) {
@@ -115,7 +119,7 @@ const ActivityZones = ({ user }) => {
       }
 
       try {
-          const res = await fetch('http://localhost:3000/api/zones', {
+          const res = await fetch(`${API_BASE}/api/zones`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -140,7 +144,7 @@ const ActivityZones = ({ user }) => {
 
   const handleDelete = async (id) => {
       if (confirm('Delete this zone?')) {
-          await fetch(`http://localhost:3000/api/zones/${id}`, { method: 'DELETE' });
+          await fetch(`${API_BASE}/api/zones/${id}`, { method: 'DELETE' });
           fetchZones();
       }
   };

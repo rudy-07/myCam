@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, Mail, Lock, Eye, EyeOff, RefreshCw, Check, Type } from 'lucide-react';
 import './Login.css';
 import { useToast } from '../context/ToastContext';
+import { API_BASE } from '../config';
 
 const Register = ({ onRegisterSuccess, onBack }) => {
   const { addToast } = useToast();
@@ -85,7 +86,7 @@ const Register = ({ onRegisterSuccess, onBack }) => {
     setError('');
 
     try {
-      const response = await fetch('http://localhost:3000/api/register', {
+      const response = await fetch(`${API_BASE}/api/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

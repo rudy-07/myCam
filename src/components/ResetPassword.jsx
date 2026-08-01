@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff, RefreshCw, Check } from 'lucide-react';
 import './Login.css';
+import { API_BASE } from '../config';
 
 const ResetPassword = () => {
   const [passwords, setPasswords] = useState({ new: '', confirm: '' });
@@ -82,7 +83,7 @@ const ResetPassword = () => {
     setStatus('loading');
     
     try {
-      const response = await fetch('http://localhost:3000/api/reset-password', {
+      const response = await fetch(`${API_BASE}/api/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, newPassword: passwords.new })

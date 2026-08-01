@@ -43,18 +43,11 @@ function App() {
     setShowForgot(false);
   };
 
-  // Authenticated View (Dashboard)
-  if (isLoggedIn) {
-    return (
-      <ToastProvider>
+  return (
+    <ToastProvider>
+      {isLoggedIn ? (
         <Dashboard user={user} onLogout={handleLogout} />
-      </ToastProvider>
-    );
-  }
-
-  // Register Modal/Page
-  if (showRegister) {
-    return (
+      ) : showRegister ? (
         <Register 
             onRegisterSuccess={() => {
                 alert('Account created! Please log in.');
@@ -63,18 +56,9 @@ function App() {
             }} 
             onBack={() => setShowRegister(false)} 
         />
-    );
-  }
-
-  // Forgot Password Page
-  if (showForgot) {
-      return <ForgotPassword onBack={() => setShowForgot(false)} />;
-  }
-
-  // Login Modal/Page
-  if (showLogin) {
-    // Pass a prop to Login to handle success
-    return (
+      ) : showForgot ? (
+        <ForgotPassword onBack={() => setShowForgot(false)} />
+      ) : showLogin ? (
         <Login 
             onLoginSuccess={handleLoginSuccess} 
             onBack={() => setShowLogin(false)}
@@ -87,22 +71,18 @@ function App() {
                 setShowForgot(true);
             }}
         />
-    );
-  }
-
-  // Public Landing Page
-  return (
-    <ToastProvider>
-      <div className="min-h-screen bg-background text-white selection:bg-primary-DEFAULT selection:text-white font-sans">
-        <Navbar onLoginClick={() => setShowLogin(true)} />
-        <Hero />
-        <main>
-          <Features />
-          <IntegrationSection />
-          <CallToAction />
-        </main>
-        <Footer />
-      </div>
+      ) : (
+        <div className="min-h-screen bg-background text-white selection:bg-primary-DEFAULT selection:text-white font-sans">
+          <Navbar onLoginClick={() => setShowLogin(true)} />
+          <Hero />
+          <main>
+            <Features />
+            <IntegrationSection />
+            <CallToAction />
+          </main>
+          <Footer />
+        </div>
+      )}
     </ToastProvider>
   );
 }
