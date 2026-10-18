@@ -1,160 +1,316 @@
-import React, { useState } from 'react';
-import { Plus, Camera, Signal, Trash2, Maximize2 } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Copy, Maximize2, Plus, Radio, SearchX, Trash2, VideoOff, AlertTriangle, ShieldAlert } from 'lucide-react';
 import CameraFeed from './CameraFeed';
 import CameraModal from './CameraModal';
+import { Button, PageHeader, StatusBadge, EmptyState, Modal } from '../ui';
+import { CAMERA_STATUS } from '../../lib/cameraStatus';
+import { API_BASE } from '../../config';
+import { authFetch, readErrorMessage } from '../../lib/api';
+import { useToast } from '../../context/ToastContext';
 
-const CameraGrid = ({ user, searchQuery }) => {
+const STATUS_LABEL = {
+  [CAMERA_STATUS.LIVE]: 'live',
+  [CAMERA_STATUS.CONNECTING]: 'connecting',
+  [CAMERA_STATUS.OFFLINE]: 'offline',
+  [CAMERA_STATUS.ERROR]: 'connection error',
+};
+
+const CameraGrid = ({ user, searchQuery, onNavigate, onClearSearch }) => {
+  const { addToast } = useToast();
+  const [cameras, setCameras] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [cameraName, setCameraName] = useState('');
+  const [saving, setSaving] = useState(false);
   const [selectedCamera, setSelectedCamera] = useState(null);
-  const [cameras, setCameras] = useState([
-    { id: 'cam2', name: 'CAM-02 (Kitchen)', status: 'offline' },
-    { id: 'cam3', name: 'CAM-03 (Garage)', status: 'offline' }
-  ]);
+  const [cameraToDelete, setCameraToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [statuses, setStatuses] = useState({});
 
-  const filteredCameras = cameras.filter(cam => 
-    cam.name.toLowerCase().includes(searchQuery?.toLowerCase() || '')
-  );
+  const loadCameras = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await authFetch(`${API_BASE}/api/cameras`);
+      if (!res.ok) throw new Error(await readErrorMessage(res));
+      const data = await res.json();
+      setCameras(Array.isArray(data) ? data : []);
+    } catch (error) {
+      addToast(error.message || 'Could not load cameras.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [addToast]);
 
-  const openCamera = (cam) => {
-    setSelectedCamera(cam);
-  };
+  useEffect(() => {
+    loadCameras();
+  }, [loadCameras]);
 
-  const addCamera = () => {
-    const newId = `cam${cameras.length + 2 + Math.floor(Math.random() * 100)}`;
-    const newCam = {
-      id: newId,
-      name: `CAM-${('0' + (cameras.length + 4)).slice(-2)} (New Feed)`,
-      status: 'offline'
-    };
-    setCameras([...cameras, newCam]);
-  };
+  const onFeedStatus = useCallback((cameraId, status, detail) => {
+    setStatuses((previous) => {
+      const current = previous[cameraId];
+      if (current?.status === status && current?.detail === detail) return previous;
+      return { ...previous, [cameraId]: { status, detail } };
+    });
+  }, []);
 
-  const deleteCamera = (id) => {
-    if(confirm('Disconnect this camera feed?')) {
-      setCameras(cameras.filter(c => c.id !== id));
+  const createCamera = async (event) => {
+    event.preventDefault();
+    const name = cameraName.trim();
+    if (name.length < 2) {
+      addToast('Enter a camera name with at least 2 characters.', 'error');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await authFetch(`${API_BASE}/api/cameras`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error(await readErrorMessage(res));
+      const created = await res.json();
+      setCameras((current) => [...current, created]);
+      setCameraName('');
+      addToast(`Camera "${created.name}" registered. Open its broadcaster link on your stream device.`, 'success', 6000);
+    } catch (error) {
+      addToast(error.message || 'Could not register camera.', 'error');
+    } finally {
+      setSaving(false);
     }
   };
 
+  const confirmDeleteCamera = async () => {
+    if (!cameraToDelete) return;
+    setDeleting(true);
+    try {
+      const res = await authFetch(`${API_BASE}/api/cameras/${encodeURIComponent(cameraToDelete.id)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error(await readErrorMessage(res));
+      setCameras((current) => current.filter((item) => item.id !== cameraToDelete.id));
+      if (selectedCamera?.id === cameraToDelete.id) setSelectedCamera(null);
+      addToast(`Camera "${cameraToDelete.name}" removed successfully.`, 'success');
+      setCameraToDelete(null);
+    } catch (error) {
+      addToast(error.message || 'Could not remove camera.', 'error');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const copyBroadcasterLink = async (camera) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('cameraId', camera.id);
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      addToast(`Broadcaster link copied for ${camera.name}. Open it on the streaming device, sign in, then click Broadcast.`, 'success', 6000);
+    } catch {
+      addToast(`Broadcaster URL: ${url.toString()}`, 'info', 8000);
+    }
+  };
+
+  const query = (searchQuery || '').trim().toLowerCase();
+  const filteredCameras = useMemo(
+    () => cameras.filter((camera) => !query || camera.name.toLowerCase().includes(query) || camera.id.toLowerCase().includes(query)),
+    [cameras, query]
+  );
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+      {/* Fullscreen Camera Modal */}
       {selectedCamera && (
-        <CameraModal 
-          camera={selectedCamera} 
+        <CameraModal
+          camera={selectedCamera}
           user={user}
-          onClose={() => setSelectedCamera(null)} 
+          onClose={() => setSelectedCamera(null)}
+          onNavigate={onNavigate}
         >
-          <CameraFeed cameraId={selectedCamera.id} />
+          <CameraFeed
+            key={selectedCamera.id}
+            feedKey={selectedCamera.id}
+            onStatusChange={(status, detail) => onFeedStatus(selectedCamera.id, status, detail)}
+          />
         </CameraModal>
       )}
 
-      {/* Header Section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/[0.07] pb-5">
-        <div>
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-blue-500/30 bg-blue-500/10 text-blue-400 text-[11px] font-bold tracking-widest uppercase mb-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse-dot" />
-            Live Surveillance Matrix
-          </div>
-          <h1 className="text-xl md:text-2xl font-extrabold tracking-tight text-slate-100">
-            Active Camera Feeds
-          </h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Real-time multi-channel monitoring and edge analytics for mySphere nodes.
-          </p>
-        </div>
-
-        <button 
-          onClick={addCamera}
-          className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-glow-sm hover:shadow-glow transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0"
-        >
-          <Plus className="w-4 h-4" />
-          Add Feed
-        </button>
-      </div>
-
-      {/* Camera Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-        {/* Main Live Mobile/WebRTC Camera Feed */}
-        <div 
-          onClick={() => openCamera({ id: 'mobile', name: 'CAM-01 (Mobile Broadcaster)', status: 'live' })}
-          className="group relative aspect-video bg-[#060810] rounded-2xl overflow-hidden border border-white/[0.08] hover:border-blue-500/50 shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer"
-        >
-          <CameraFeed />
-
-          {/* Top Live Badge */}
-          <div className="absolute top-3 left-3 flex items-center gap-2 z-10">
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold tracking-wider uppercase backdrop-blur-md animate-pulse-ring">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              LIVE
-            </div>
-          </div>
-
-          {/* Bottom Title Bar */}
-          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-[#060810]/90 via-[#060810]/40 to-transparent p-3 flex items-center justify-between pointer-events-none">
-            <span className="text-xs font-mono font-semibold text-slate-100 backdrop-blur-sm">
-              CAM-01 (Mobile Stream)
-            </span>
-            <Maximize2 className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-400 transition-colors" />
-          </div>
-
-          {/* Hover Overlay */}
-          <div className="absolute inset-0 bg-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center pointer-events-none">
-            <span className="bg-[#0a0d1a]/90 text-blue-300 border border-blue-500/30 px-3.5 py-1.5 rounded-full text-xs font-bold backdrop-blur-md shadow-glow-sm">
-              Expand Stream
-            </span>
-          </div>
-        </div>
-
-        {/* Dynamic User Added Cameras */}
-        {filteredCameras.map((cam) => (
-          <div 
-            key={cam.id} 
-            onClick={() => openCamera(cam)}
-            className="group relative aspect-video bg-[#0a0d1a]/80 rounded-2xl overflow-hidden border border-white/[0.08] hover:border-white/[0.16] shadow-lg transition-all duration-300 hover:-translate-y-1 cursor-pointer flex flex-col justify-between"
-          >
-            {/* Top Badges */}
-            <div className="p-3 flex items-center justify-between z-10">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-slate-400 text-[10px] font-semibold uppercase backdrop-blur-md">
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-                OFFLINE
-              </div>
-
-              <button 
-                onClick={(e) => { e.stopPropagation(); deleteCamera(cam.id); }}
-                className="opacity-0 group-hover:opacity-100 p-1.5 bg-red-500/20 hover:bg-red-500/40 text-red-400 rounded-lg transition-all duration-200 border border-red-500/30"
-                title="Disconnect Feed"
+      {/* Confirmation Modal for Removing Camera */}
+      {cameraToDelete && (
+        <Modal
+          title="Remove Camera"
+          size="md"
+          closeLabel="Cancel camera removal"
+          onClose={() => !deleting && setCameraToDelete(null)}
+          footer={
+            <div className="flex w-full items-center justify-end gap-2.5">
+              <Button
+                variant="secondary"
+                onClick={() => setCameraToDelete(null)}
+                disabled={deleting}
               >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                icon={Trash2}
+                onClick={confirmDeleteCamera}
+                disabled={deleting}
+              >
+                {deleting ? 'Removing…' : 'Remove Camera'}
+              </Button>
             </div>
-
-            {/* Offline Center Icon */}
-            <div className="flex flex-col items-center justify-center my-auto text-slate-600 group-hover:text-slate-500 transition-colors">
-              <Camera className="w-8 h-8 mb-1 opacity-50" />
-              <span className="text-[11px] font-medium">Stream Offline</span>
-            </div>
-
-            {/* Bottom Bar */}
-            <div className="p-3 bg-[#060810]/70 border-t border-white/[0.04]">
-              <span className="text-xs font-mono font-semibold text-slate-300">
-                {cam.name}
-              </span>
-            </div>
-          </div>
-        ))}
-        
-        {/* Add Feed Card */}
-        <div 
-          onClick={addCamera}
-          className="aspect-video bg-white/[0.02] hover:bg-white/[0.04] rounded-2xl border-2 border-dashed border-white/[0.08] hover:border-blue-500/40 transition-all duration-300 flex flex-col items-center justify-center cursor-pointer group text-slate-500 hover:text-blue-400"
+          }
         >
-          <div className="p-3 rounded-full bg-white/[0.04] group-hover:bg-blue-500/10 mb-2 transition-colors border border-white/[0.08]">
-            <Plus className="w-5 h-5" />
+          <div className="space-y-3 p-1">
+            <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/5 p-3.5 text-small text-fg">
+              <AlertTriangle className="size-5 shrink-0 text-warning" aria-hidden="true" />
+              <p>
+                Are you sure you want to remove <strong className="font-semibold text-fg">{cameraToDelete.name}</strong> (<code className="font-mono text-xs">{cameraToDelete.id}</code>)?
+              </p>
+            </div>
+            <p className="text-small text-fg-muted">
+              This will remove this camera's registration and associated activity zones and schedules. Past recorded videos and snapshots will remain saved in your storage.
+            </p>
           </div>
-          <span className="text-xs font-bold tracking-wide">Connect Camera Feed</span>
+        </Modal>
+      )}
+
+      {/* Page Header */}
+      <PageHeader
+        eyebrow="Monitoring"
+        title="Camera feeds"
+        description="Monitor registered camera streams in real-time. Click any camera card to launch the fullscreen theater view with controls."
+      />
+
+      {/* 1. Camera Cards Grid (Shown First) */}
+      {loading ? (
+        <div className="card card-body flex items-center justify-center p-12 text-small text-fg-muted" role="status">
+          <div className="flex items-center gap-3">
+            <div className="size-4 animate-spin rounded-full border-2 border-accent border-t-transparent"></div>
+            Loading registered cameras…
+          </div>
         </div>
-      </div>
+      ) : filteredCameras.length === 0 ? (
+        <EmptyState
+          icon={SearchX}
+          title={query ? 'No cameras match your search' : 'No cameras registered'}
+          description={
+            query
+              ? `Nothing matches "${searchQuery.trim()}".`
+              : 'Register a camera below to get started broadcasting and monitoring.'
+          }
+          action={onClearSearch && query && <Button onClick={onClearSearch}>Clear search</Button>}
+        />
+      ) : (
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          {filteredCameras.map((camera) => {
+            const feed = statuses[camera.id] || { status: CAMERA_STATUS.CONNECTING, detail: 'Waiting for broadcaster status…' };
+            const isLive = feed.status === CAMERA_STATUS.LIVE;
+            return (
+              <article className="card overflow-hidden hover:border-border-strong transition-all duration-200" key={camera.id}>
+                {/* Clickable Card Video Thumbnail */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedCamera(camera)}
+                  aria-label={`Open ${camera.name}. Status: ${STATUS_LABEL[feed.status] || 'unknown'}.`}
+                  className="group relative aspect-video w-full overflow-hidden bg-surface-sunken text-left cursor-pointer"
+                >
+                  <CameraFeed
+                    key={`preview-${camera.id}`}
+                    feedKey={camera.id}
+                    onStatusChange={(status, detail) => onFeedStatus(camera.id, status, detail)}
+                    announce={false}
+                  />
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 text-white">
+                    <span className="truncate font-semibold text-xs">{camera.name}</span>
+                    <span className="flex items-center gap-1 rounded bg-black/60 px-2 py-0.5 text-[11px] backdrop-blur text-white/90 group-hover:bg-accent group-hover:text-white transition-colors">
+                      <Maximize2 className="size-3.5 shrink-0" aria-hidden="true" />
+                      Expand
+                    </span>
+                  </div>
+                </button>
+
+                <div className="card-body space-y-3.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="section-title text-base font-semibold break-words">{camera.name}</h2>
+                      <p className="mt-0.5 break-all font-mono text-xs text-fg-subtle">{camera.id}</p>
+                    </div>
+                    <StatusBadge status={feed.status} pulse={isLive} />
+                  </div>
+
+                  <p className="text-small text-fg-muted" role="status">
+                    {feed.detail}
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={Radio}
+                      onClick={() => copyBroadcasterLink(camera)}
+                      title="Copy link to broadcast from mobile or another device"
+                    >
+                      Broadcaster link
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={Trash2}
+                      onClick={() => setCameraToDelete(camera)}
+                      aria-label={`Remove ${camera.name}`}
+                      className="text-fg-subtle hover:text-danger hover:bg-danger/10"
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 2. Register a Camera Card (Placed BELOW Camera Cards) */}
+      <section className="card border-dashed border-border-strong/70 bg-surface/50">
+        <div className="card-body space-y-4">
+          <div>
+            <h3 className="section-title text-base">Register a new camera</h3>
+            <p className="text-small text-fg-muted mt-0.5">
+              Add a camera device to your account to assign it an independent WebRTC stream channel.
+            </p>
+          </div>
+
+          <form onSubmit={createCamera} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <label className="min-w-0 flex-1 text-small font-medium text-fg" htmlFor="camera-name">
+              Camera Name
+              <input
+                id="camera-name"
+                value={cameraName}
+                onChange={(event) => setCameraName(event.target.value)}
+                maxLength={100}
+                minLength={2}
+                placeholder="e.g. Front Porch, Driveway, Living Room"
+                className="field mt-1.5 w-full"
+                required
+              />
+            </label>
+            <Button
+              type="submit"
+              icon={Plus}
+              disabled={saving}
+              className="sm:min-w-[130px]"
+            >
+              {saving ? 'Registering…' : 'Add camera'}
+            </Button>
+          </form>
+        </div>
+      </section>
+
+      {/* Helpful footnote */}
+      <p className="text-xs text-fg-subtle leading-relaxed">
+        Each camera uses an independent WebRTC signalling room. A registered camera connects when a device opens its broadcaster link and begins streaming video.
+      </p>
     </div>
   );
 };
 
 export default CameraGrid;
-

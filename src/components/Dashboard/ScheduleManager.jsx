@@ -1,327 +1,234 @@
-import React, { useState, useEffect } from 'react';
-import { Clock, Plus, Calendar, Trash2, CheckCircle2, XCircle, Power, Camera, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Plus, Calendar, Trash2, Power, Pencil, AlertTriangle, RefreshCw, Clock, Moon, Info } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
+import { Button, PageHeader, EmptyState, StatusBadge, ConfirmDialog } from '../ui';
+import ScheduleFormModal from './ScheduleFormModal';
+import useApiResource, { requireArray } from '../../hooks/useApiResource';
+import { sendJson } from '../../lib/api';
 import { API_BASE } from '../../config';
-
-const DAYS_LIST = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+import { cameraLabel } from '../../lib/cameras';
+import { DAYS, parseDays, toHHMM, isOvernight, isWindowOpenNow, summarizeDays } from '../../lib/schedule';
 
 const ScheduleManager = ({ user }) => {
   const { addToast } = useToast();
-  const [schedules, setSchedules] = useState([]);
-  const [showModal, setShowModal] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const userId = user?.id;
+  const res = useApiResource(userId ? `${API_BASE}/api/schedules?user_id=${userId}` : null, requireArray);
+  const schedules = res.data;
 
-  // Form State
-  const [form, setForm] = useState({
-    name: '',
-    camera_id: 'mobile',
-    days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-    start_time: '22:00',
-    end_time: '06:00'
-  });
+  const [formState, setFormState] = useState(null); // { schedule } | null  (schedule undefined = create)
+  const [pendingToggle, setPendingToggle] = useState(null);
+  const toggleLock = useRef(false);
+  const [confirm, setConfirm] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const deleteLock = useRef(false);
+  const headingRef = useRef(null);
 
-  const fetchSchedules = async () => {
-    if (!user || !user.id) return;
-    try {
-      const res = await fetch(`${API_BASE}/api/schedules?user_id=${user.id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSchedules(data);
-      }
-    } catch (err) {
-      console.error("Failed to load schedules", err);
-    }
-  };
-
+  // Re-evaluate "window open now" every 30 s. This is a clock check, not recording status.
+  const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    fetchSchedules();
-  }, [user]);
+    const id = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(id);
+  }, []);
 
-  const handleCreateSchedule = async (e) => {
-    e.preventDefault();
-    if (!form.name || form.days.length === 0) {
-      addToast('Schedule name and at least one active day are required.', 'error');
-      return;
-    }
+  const openNow = useMemo(() => (schedules || []).filter((s) => isWindowOpenNow(s, now)), [schedules, now]);
+  const enabledCount = (schedules || []).filter((s) => s.is_active).length;
 
-    setLoading(true);
+  const toggle = async (sch) => {
+    if (toggleLock.current) return;
+    toggleLock.current = true;
+    setPendingToggle(sch.id);
+    const next = !sch.is_active;
     try {
-      const res = await fetch(`${API_BASE}/api/schedules`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user.id,
-          camera_id: form.camera_id,
-          name: form.name,
-          days: form.days,
-          start_time: form.start_time,
-          end_time: form.end_time
-        })
-      });
-
-      if (res.ok) {
-        addToast('Schedule created successfully!', 'success');
-        setShowModal(false);
-        setForm({
-          name: '',
-          camera_id: 'mobile',
-          days: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-          start_time: '22:00',
-          end_time: '06:00'
-        });
-        fetchSchedules();
-      } else {
-        addToast('Failed to create schedule.', 'error');
-      }
+      await sendJson(`${API_BASE}/api/schedules/${sch.id}`, 'PUT', { is_active: next });
+      res.setData((list) => (list || []).map((s) => (s.id === sch.id ? { ...s, is_active: next ? 1 : 0 } : s)));
+      addToast(`“${sch.name}” ${next ? 'enabled' : 'disabled'}.`, 'info');
     } catch (err) {
-      addToast('Network error creating schedule.', 'error');
+      addToast(`The schedule was not changed: ${err.message}`, 'error', 5000);
     } finally {
-      setLoading(false);
+      toggleLock.current = false;
+      setPendingToggle(null);
     }
   };
 
-  const toggleScheduleActive = async (id, currentStatus) => {
+  const remove = async () => {
+    if (deleteLock.current || !confirm) return;
+    deleteLock.current = true;
+    setDeleting(true);
+    setDeleteError('');
+    const sch = confirm;
     try {
-      const res = await fetch(`${API_BASE}/api/schedules/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_active: !currentStatus })
-      });
-
-      if (res.ok) {
-        addToast(`Schedule ${!currentStatus ? 'activated' : 'disabled'}`, 'info');
-        fetchSchedules();
-      }
+      await sendJson(`${API_BASE}/api/schedules/${sch.id}`, 'DELETE');
+      const remaining = (schedules || []).filter((s) => s.id !== sch.id);
+      res.setData(remaining);
+      // Empty schedules are valid now; refresh even after deleting the final item.
+      res.reload();
+      addToast(`Schedule “${sch.name}” deleted.`, 'success');
+      setConfirm(null);
+      setTimeout(() => headingRef.current?.focus(), 0);
     } catch (err) {
-      addToast('Failed to toggle schedule.', 'error');
+      setDeleteError(`The schedule was not deleted: ${err.message}`);
+      addToast(`The schedule was not deleted: ${err.message}`, 'error', 5000);
+    } finally {
+      deleteLock.current = false;
+      setDeleting(false);
     }
   };
 
-  const handleDeleteSchedule = async (id) => {
-    if (confirm('Delete this recording schedule?')) {
-      try {
-        const res = await fetch(`${API_BASE}/api/schedules/${id}`, { method: 'DELETE' });
-        if (res.ok) {
-          addToast('Schedule deleted', 'success');
-          fetchSchedules();
-        }
-      } catch (err) {
-        addToast('Failed to delete schedule', 'error');
-      }
-    }
-  };
-
-  const toggleDaySelection = (day) => {
-    if (form.days.includes(day)) {
-      setForm({ ...form, days: form.days.filter(d => d !== day) });
-    } else {
-      setForm({ ...form, days: [...form.days, day] });
-    }
+  const handleSaved = (message) => {
+    setFormState(null);
+    addToast(message, 'success');
+    res.reload();
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold text-white flex items-center gap-3">
-            <Clock className="text-primary-DEFAULT" /> Scheduled Recording Windows
-          </h2>
-          <p className="text-slate-400 text-sm mt-1">
-            Automate video recording across designated time windows and days to save storage space and focus on key surveillance hours.
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Recording windows"
+        title="Schedules"
+        description="Save the days and times when a recording window should apply. Automatic recording runs only while this camera viewer is open, the camera is live, and the browser remains active. It cannot record while the browser is closed or the camera is disconnected."
+        actions={<Button variant="primary" icon={Plus} onClick={() => setFormState({})}>New schedule</Button>}
+      />
+
+      {openNow.length > 0 && (
+        <div role="status" className="callout callout-info">
+          <Info aria-hidden="true" />
+          <p>
+            The current time is inside {openNow.length === 1 ? 'the window of' : 'the windows of'}{' '}
+            <strong className="font-semibold">{openNow.map((s) => s.name).join(', ')}</strong>. This does not mean a recording is running; start one from the camera viewer.
           </p>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 bg-primary-DEFAULT hover:bg-primary-hover text-white px-5 py-2.5 rounded-xl font-bold transition-all shadow-lg"
-        >
-          <Plus size={18} /> New Schedule Rule
-        </button>
-      </div>
+      )}
 
-      {/* Schedules List */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {schedules.length === 0 ? (
-          <div className="col-span-full bg-slate-800/50 border border-slate-700/50 rounded-2xl p-12 text-center">
-            <Calendar className="w-12 h-12 text-slate-500 mx-auto mb-3" />
-            <h3 className="text-slate-300 font-bold text-lg">No Schedules Configured</h3>
-            <p className="text-slate-500 text-sm mt-1 max-w-md mx-auto">
-              Create a custom recording window schedule to automatically activate surveillance during specific hours (e.g. night time or weekends).
-            </p>
-          </div>
-        ) : (
-          schedules.map((sch) => {
-            const days = typeof sch.days_json === 'string' ? JSON.parse(sch.days_json) : sch.days_json || [];
-            return (
-              <div 
-                key={sch.id} 
-                className={`bg-slate-800 rounded-2xl border transition-all p-6 flex flex-col justify-between space-y-4 shadow-xl ${sch.is_active ? 'border-primary-DEFAULT/50 bg-slate-800' : 'border-slate-700 opacity-60'}`}
-              >
-                <div>
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <span className="text-[10px] uppercase font-bold tracking-wider bg-slate-900 text-primary-DEFAULT px-2.5 py-1 rounded-md border border-slate-700">
-                        {sch.camera_id}
-                      </span>
-                      <h3 className="font-bold text-white text-lg mt-2">{sch.name}</h3>
-                    </div>
-                    <button 
-                      onClick={() => toggleScheduleActive(sch.id, sch.is_active)}
-                      className={`p-2 rounded-xl border transition-colors ${sch.is_active ? 'bg-green-500/20 text-green-400 border-green-500/40' : 'bg-slate-900 text-slate-500 border-slate-700'}`}
-                      title={sch.is_active ? 'Disable Schedule' : 'Enable Schedule'}
-                    >
-                      <Power size={18} />
-                    </button>
-                  </div>
-
-                  {/* Time Window */}
-                  <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700 flex items-center justify-between text-sm font-mono my-3">
-                    <div className="flex items-center gap-2 text-slate-300">
-                      <Clock size={16} className="text-primary-DEFAULT" />
-                      <span>{sch.start_time}</span>
-                    </div>
-                    <span className="text-slate-500 font-sans">to</span>
-                    <div className="flex items-center gap-2 text-slate-300">
-                      <span>{sch.end_time}</span>
-                    </div>
-                  </div>
-
-                  {/* Days Matrix */}
-                  <div className="flex flex-wrap gap-1.5 mt-3">
-                    {DAYS_LIST.map((day) => {
-                      const isActive = days.includes(day);
-                      return (
-                        <span 
-                          key={day} 
-                          className={`text-[11px] font-bold px-2 py-0.5 rounded ${isActive ? 'bg-primary-DEFAULT text-white' : 'bg-slate-900 text-slate-600'}`}
-                        >
-                          {day}
-                        </span>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="pt-3 border-t border-slate-700/50 flex justify-between items-center text-xs">
-                  <span className="text-slate-500">
-                    Status: <strong className={sch.is_active ? 'text-green-400' : 'text-slate-500'}>{sch.is_active ? 'Active' : 'Disabled'}</strong>
-                  </span>
-                  <button 
-                    onClick={() => handleDeleteSchedule(sch.id)}
-                    className="text-slate-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-slate-700/50 transition-colors"
-                    title="Delete Schedule"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      {/* Schedule Creator Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="bg-slate-900 rounded-3xl border border-slate-700 w-full max-w-lg overflow-hidden shadow-2xl animate-fade-in">
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
-              <h3 className="font-bold text-white text-lg flex items-center gap-2">
-                <Plus className="text-primary-DEFAULT" /> Create Recording Schedule Rule
-              </h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-white">
-                <XCircle size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateSchedule} className="p-6 space-y-5">
-              <div>
-                <label className="text-xs text-slate-400 font-bold uppercase tracking-wider block mb-1">Schedule Name</label>
-                <input 
-                  type="text" 
-                  value={form.name} 
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="e.g. Night Surveillance or Weekend Guard" 
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white outline-none focus:border-primary-DEFAULT text-sm"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400 font-bold uppercase tracking-wider block mb-1">Target Camera</label>
-                <select 
-                  value={form.camera_id}
-                  onChange={(e) => setForm({ ...form, camera_id: e.target.value })}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white outline-none focus:border-primary-DEFAULT text-sm"
-                >
-                  <option value="mobile">CAM-MOBILE (Live Smartphone)</option>
-                  <option value="cam2">CAM-02 (Kitchen)</option>
-                  <option value="cam3">CAM-03 (Garage)</option>
-                </select>
-              </div>
-
-              {/* Time Pickers */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-slate-400 font-bold uppercase tracking-wider block mb-1">Start Time</label>
-                  <input 
-                    type="time" 
-                    value={form.start_time}
-                    onChange={(e) => setForm({ ...form, start_time: e.target.value })}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white outline-none focus:border-primary-DEFAULT text-sm font-mono"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 font-bold uppercase tracking-wider block mb-1">End Time</label>
-                  <input 
-                    type="time" 
-                    value={form.end_time}
-                    onChange={(e) => setForm({ ...form, end_time: e.target.value })}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white outline-none focus:border-primary-DEFAULT text-sm font-mono"
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Day of Week Selector */}
-              <div>
-                <label className="text-xs text-slate-400 font-bold uppercase tracking-wider block mb-2">Active Days</label>
-                <div className="grid grid-cols-7 gap-1.5">
-                  {DAYS_LIST.map((day) => {
-                    const isSelected = form.days.includes(day);
-                    return (
-                      <button
-                        type="button"
-                        key={day}
-                        onClick={() => toggleDaySelection(day)}
-                        className={`py-2 rounded-lg text-xs font-bold transition-all ${isSelected ? 'bg-primary-DEFAULT text-white shadow-md' : 'bg-slate-800 text-slate-500 border border-slate-700'}`}
-                      >
-                        {day}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="pt-4 flex justify-end gap-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm font-bold transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="px-6 py-2.5 bg-primary-DEFAULT hover:bg-primary-hover text-white rounded-xl text-sm font-bold transition-colors disabled:opacity-50"
-                >
-                  {loading ? 'Saving Schedule...' : 'Save Schedule Rule'}
-                </button>
-              </div>
-            </form>
+      {schedules && res.error && (
+        <div role="alert" className="callout callout-warning">
+          <AlertTriangle aria-hidden="true" />
+          <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-3">
+            <p>Could not refresh schedules: {res.error} Showing the last list that loaded.</p>
+            <Button size="sm" icon={RefreshCw} onClick={res.reload} loading={res.refreshing}>Try again</Button>
           </div>
         </div>
+      )}
+
+      <h2 ref={headingRef} tabIndex={-1} className="sr-only">Saved schedules</h2>
+
+      {res.loading && (
+        <div role="status">
+          <span className="sr-only">Loading schedules…</span>
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3" aria-hidden="true">
+            {[0, 1, 2].map((i) => <div key={i} className="card h-52 animate-pulse bg-surface-sunken" />)}
+          </div>
+        </div>
+      )}
+
+      {!res.loading && res.error && !schedules && (
+        <EmptyState
+          tone="error" icon={AlertTriangle}
+          title="Schedules could not be loaded"
+          description={res.error}
+          action={<Button icon={RefreshCw} onClick={res.reload}>Try again</Button>}
+        />
+      )}
+
+      {schedules && schedules.length === 0 && !res.error && (
+        <EmptyState
+          icon={Calendar}
+          title="No schedules saved"
+          description="Create a recording window for specific hours, such as night time or weekends. Windows are saved as configuration and do not start recording by themselves. Your list stays empty until you create a schedule."
+          action={<Button variant="primary" icon={Plus} onClick={() => setFormState({})}>New schedule</Button>}
+        />
+      )}
+
+      {schedules && schedules.length > 0 && (
+        <>
+          <p className="meta-text" role="status">{schedules.length} {schedules.length === 1 ? 'schedule' : 'schedules'} · {enabledCount} enabled</p>
+          <ul className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {schedules.map((sch) => {
+              const { days, valid } = parseDays(sch.days_json);
+              const start = toHHMM(sch.start_time);
+              const end = toHHMM(sch.end_time);
+              const enabled = Boolean(sch.is_active);
+              const open = isWindowOpenNow(sch, now);
+              return (
+                <li key={sch.id} className="min-w-0">
+                  <article className={`card card-body flex h-full flex-col gap-4 ${enabled ? 'card-selected' : ''}`}>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusBadge status={enabled ? 'info' : 'unavailable'} label={enabled ? 'Enabled' : 'Disabled'} />
+                        {open && <span className="badge badge-neutral"><Clock className="size-3.5" aria-hidden="true" />Window open now</span>}
+                      </div>
+                      <h3 className="section-title mt-2 break-words [overflow-wrap:anywhere]">{sch.name}</h3>
+                      <p className="meta-text mt-0.5">{cameraLabel(sch.camera_id)}</p>
+                    </div>
+
+                    <div className="rounded-control border border-border bg-surface-sunken p-3">
+                      <p className="flex items-center gap-2 font-mono text-small text-fg">
+                        <Clock className="size-4 shrink-0 text-accent" aria-hidden="true" />
+                        {start || '--:--'} <span className="font-sans text-fg-subtle">to</span> {end || '--:--'}
+                      </p>
+                      {isOvernight(start, end) && (
+                        <p className="meta-text mt-1.5 flex items-center gap-1.5"><Moon className="size-3 shrink-0" aria-hidden="true" />Overnight: ends the next day</p>
+                      )}
+                    </div>
+
+                    <div>
+                      {valid ? (
+                        <>
+                          <p className="meta-text mb-1.5">{summarizeDays(days)}</p>
+                          <ul className="flex flex-wrap gap-1.5" aria-label="Active days">
+                            {DAYS.map((d) => {
+                              const on = days.includes(d);
+                              return (
+                                <li key={d} className={`rounded-md px-2 py-0.5 text-xs font-semibold ${on ? 'bg-accent text-accent-fg' : 'bg-surface-sunken text-fg-subtle'}`}>
+                                  {d}<span className="sr-only">{on ? ' (active)' : ' (inactive)'}</span>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </>
+                      ) : (
+                        <p className="meta-text flex items-center gap-1.5 text-warning"><AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />The saved days could not be read. Edit this schedule to fix them.</p>
+                      )}
+                    </div>
+
+                    <div className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3">
+                      <Button
+                        size="sm" icon={Power}
+                        loading={pendingToggle === sch.id}
+                        disabled={pendingToggle !== null && pendingToggle !== sch.id}
+                        onClick={() => toggle(sch)}
+                        aria-label={`${enabled ? 'Disable' : 'Enable'} schedule ${sch.name}`}
+                      >
+                        {enabled ? 'Disable' : 'Enable'}
+                      </Button>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="sm" iconOnly icon={Pencil} onClick={() => setFormState({ schedule: sch })} aria-label={`Edit schedule ${sch.name}`} title="Edit schedule" />
+                        <Button variant="danger-subtle" size="sm" iconOnly icon={Trash2} onClick={() => { setDeleteError(''); setConfirm(sch); }} aria-label={`Delete schedule ${sch.name}`} title="Delete schedule" />
+                      </div>
+                    </div>
+                  </article>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+
+      {formState && (
+        <ScheduleFormModal user={user} schedule={formState.schedule} onClose={() => setFormState(null)} onSaved={handleSaved} />
+      )}
+
+      {confirm && (
+        <ConfirmDialog
+          title={`Delete schedule “${confirm.name}”?`}
+          confirmLabel="Delete schedule"
+          busy={deleting}
+          error={deleteError}
+          onConfirm={remove}
+          onCancel={() => setConfirm(null)}
+        >
+          <p>This removes the saved schedule. Nothing is recorded or deleted from your recordings.</p>
+        </ConfirmDialog>
       )}
     </div>
   );

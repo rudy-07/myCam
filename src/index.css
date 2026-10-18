@@ -1,41 +1,67 @@
+@import "@fontsource-variable/inter";
 @import "tailwindcss";
+@import "./styles/tokens.css";
+@import "./styles/components.css";
+@import "./styles/landing.css";
+@import "./styles/auth.css";
+@import "./styles/public_pages.css";
+@import "./styles/cookie_consent.css";
 
 @layer base {
-  :root {
-    --bg-primary: #060810;
-    --bg-secondary: #0a0d1a;
-    --bg-tertiary: #0f1424;
-    --bg-card: rgba(255, 255, 255, 0.035);
-    --bg-card-hover: rgba(255, 255, 255, 0.06);
-    --border: rgba(255, 255, 255, 0.07);
-    --border-hover: rgba(255, 255, 255, 0.14);
-    --border-accent: rgba(59, 130, 246, 0.3);
-
-    --text-primary: #eef2ff;
-    --text-secondary: #7c8ba8;
-    --text-muted: #4a5568;
-
-    --accent-blue: #3b82f6;
-    --accent-blue-light: #60a5fa;
-    --accent-purple: #6366f1;
-    --accent-emerald: #10b981;
-    --accent-red: #ef4444;
-
-    --glass-blur: blur(20px);
-    --glass-blur-sm: blur(10px);
+  html {
+    scroll-behavior: smooth;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) var(--color-background);
+    -webkit-text-size-adjust: 100%;
+    scroll-padding-top: 1rem;
   }
 
   body {
-    background-color: var(--bg-primary);
-    color: var(--text-primary);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    min-height: 100vh;
-    overflow-x: hidden;
+    @apply min-h-screen overflow-x-hidden bg-background font-sans text-body text-fg antialiased;
+  }
+
+  /* Form controls inherit the type system instead of browser defaults */
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+
+  ::selection { background: var(--color-accent-soft); color: var(--color-fg); }
+
+  /* One consistent, always-visible keyboard focus indicator */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--color-background); }
+  ::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--color-fg-subtle); }
+
+  /* Larger touch targets for coarse pointers */
+  @media (pointer: coarse) {
+    .btn { min-height: 2.75rem; }
+    .btn-icon { width: 2.75rem; height: 2.75rem; }
+    .input, .select { min-height: 2.75rem; }
+  }
+
+  /* Reduced motion: remove decorative movement while keeping progress
+     indicators visibly animated for users waiting on an operation. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+    }
+    .animate-spin {
+      animation-duration: 1s !important;
+      animation-iteration-count: infinite !important;
+    }
   }
 }
 
-/* Ambient Background Layer identical to myCloud app_shell */
+/* Quiet ambient page background (kept from the existing identity, de-saturated) */
 .shell-bg {
   position: fixed;
   inset: 0;
@@ -43,8 +69,7 @@
   pointer-events: none;
   background:
     radial-gradient(ellipse 60% 40% at 70% 0%, rgba(59, 130, 246, 0.08) 0%, transparent 60%),
-    radial-gradient(ellipse 40% 30% at 10% 80%, rgba(99, 102, 241, 0.06) 0%, transparent 55%),
-    #060810;
+    var(--color-background);
 }
 
 .shell-bg-grid {
@@ -53,54 +78,22 @@
   z-index: -1;
   pointer-events: none;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+    linear-gradient(rgb(255 255 255 / 0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.015) 1px, transparent 1px);
   background-size: 50px 50px;
   mask-image: radial-gradient(ellipse 100% 100% at 50% 0%, black 0%, transparent 75%);
   -webkit-mask-image: radial-gradient(ellipse 100% 100% at 50% 0%, black 0%, transparent 75%);
 }
 
-/* Custom Scrollbar matching myCloud */
-html {
-  scrollbar-width: thin;
-  scrollbar-color: #3b82f6 #060810;
+[data-theme="light"] .shell-bg {
+  background:
+    radial-gradient(ellipse 60% 40% at 70% 0%, rgba(37, 99, 235, 0.05) 0%, transparent 60%),
+    var(--color-background);
 }
 
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: #060810;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #3b82f6;
-  border-radius: 9999px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #2563eb;
-}
-
-/* Keyframe animations */
-@keyframes pulse-ring {
-  0%   { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5); }
-  70%  { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%     { opacity: 0.5; transform: scale(0.8); }
-}
-
-.animate-pulse-ring {
-  animation: pulse-ring 2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-
-.animate-pulse-dot {
-  animation: pulse-dot 2s ease-in-out infinite;
+[data-theme="light"] .shell-bg-grid {
+  background-image:
+    linear-gradient(rgb(0 0 0 / 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(0 0 0 / 0.03) 1px, transparent 1px);
 }
 

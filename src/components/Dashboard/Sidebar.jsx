@@ -1,144 +1,135 @@
-import React from 'react';
-import { Camera, Video, Settings, Activity, Users, LogOut, ChevronLeft, ChevronRight, Clock, Shield } from 'lucide-react';
-import { motion } from 'framer-motion';
+import React, { useEffect, useRef } from 'react';
+import { LogOut, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import logoIcon from '../../assets/mycam_no_text.png';
+import { NAV_GROUPS } from './navConfig';
 
-const Sidebar = ({ isCollapsed, onToggle, onLogout, activeTab, onTabChange }) => {
-  const mainItems = [
-    { id: 'cameras', icon: Camera, label: 'Cameras' },
-    { id: 'recordings', icon: Video, label: 'Recordings' },
-    { id: 'schedules', icon: Clock, label: 'Schedules' },
-    { id: 'activity', icon: Activity, label: 'Activity Zones' },
-    { id: 'broadcast', icon: Users, label: 'Broadcast' },
-  ];
+/**
+ * One sidebar, two presentations:
+ *  - desktop (md+): static column, expanded 240px or collapsed 76px rail
+ *  - mobile: off-canvas drawer with backdrop. While closed it is `inert`, so
+ *    nothing inside can be focused or read by assistive tech.
+ */
+const Sidebar = ({ isDesktop, isCollapsed, onToggle, mobileOpen, onMobileClose, onLogout, activeTab, onTabChange }) => {
+  const asideRef = useRef(null);
+  const closeRef = useRef(null);
+  const drawerOpen = !isDesktop && mobileOpen;
+  const collapsed = isDesktop && isCollapsed; // the drawer is always full width
 
-  const systemItems = [
-    { id: 'settings', icon: Settings, label: 'Settings' },
-  ];
+  // Drawer behaviour: focus in, Escape, Tab containment, scroll lock.
+  useEffect(() => {
+    if (!drawerOpen) return undefined;
+    closeRef.current?.focus();
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => {
+      if (e.key === 'Escape') { onMobileClose(); return; }
+      if (e.key !== 'Tab') return;
+      const items = asideRef.current?.querySelectorAll('button:not([disabled]), a[href]');
+      if (!items?.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [drawerOpen, onMobileClose]);
+
+  const select = (id) => { onTabChange(id); if (!isDesktop) onMobileClose(); };
+
+  const positioning = isDesktop
+    ? 'relative z-30 h-full shrink-0'
+    : `fixed inset-y-0 left-0 z-[60] w-[min(18rem,85vw)] transition-transform duration-200 ${drawerOpen ? 'translate-x-0 shadow-overlay' : '-translate-x-full'}`;
 
   return (
-    <motion.aside 
-      animate={{ width: isCollapsed ? 76 : 240 }}
-      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-      className="h-screen bg-[#060810]/70 backdrop-blur-xl border-r border-white/[0.07] flex flex-col relative z-30 sticky top-0"
-    >
-      {/* Header / Brand */}
-      <div className="h-[68px] flex items-center px-4 border-b border-white/[0.07] relative justify-between">
-        <div 
-          className="flex items-center gap-3 cursor-pointer group overflow-hidden"
-          onClick={() => onTabChange('cameras')}
-        >
-          <img 
-            src={logoIcon} 
-            alt="myCam Logo" 
-            className="w-8 h-8 object-contain transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6 flex-shrink-0"
-          />
-          {!isCollapsed && (
-            <motion.span 
-              initial={{ opacity: 0 }} 
-              animate={{ opacity: 1 }} 
-              className="font-extrabold text-base text-[#eef2ff] tracking-tight whitespace-nowrap"
+    <>
+      {drawerOpen && (
+        <div className="fixed inset-0 z-[55] bg-overlay animate-fade-in" onClick={onMobileClose} aria-hidden="true" />
+      )}
+      <aside
+        id="app-sidebar"
+        ref={asideRef}
+        inert={!isDesktop && !mobileOpen}
+        aria-label="Primary"
+        style={isDesktop ? { width: collapsed ? 76 : 240 } : undefined}
+        className={`flex flex-col border-r border-border bg-surface ${isDesktop ? 'transition-[width] duration-200' : ''} ${positioning}`}
+      >
+        <div className={`flex h-[68px] shrink-0 items-center border-b border-border px-4 ${collapsed ? 'justify-center' : 'justify-between'}`}>
+          <button
+            type="button"
+            onClick={() => select('cameras')}
+            className="flex min-w-0 items-center gap-3 rounded-control"
+            aria-label="myCam, go to Cameras"
+          >
+            <img src={logoIcon} alt="" width="32" height="32" className="size-8 shrink-0 object-contain" />
+            {!collapsed && (
+              <span className="whitespace-nowrap text-heading font-bold tracking-tight text-fg">my<span className="text-accent">Cam</span></span>
+            )}
+          </button>
+          {!isDesktop && (
+            <button ref={closeRef} type="button" onClick={onMobileClose} className="btn btn-ghost btn-icon btn-sm" aria-label="Close navigation">
+              <X className="size-4" aria-hidden="true" />
+            </button>
+          )}
+        </div>
+
+        <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4" aria-label="Dashboard sections">
+          {NAV_GROUPS.map(({ heading, items }) => (
+            <div key={heading}>
+              {collapsed
+                ? <div className="mx-3 mb-2 border-t border-border first:hidden" aria-hidden="true" />
+                : <p className="mb-2 px-3 text-xs font-medium uppercase tracking-wide text-fg-subtle">{heading}</p>}
+              <ul className="space-y-1">
+                {items.map((item) => (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      onClick={() => select(item.id)}
+                      aria-current={activeTab === item.id ? 'page' : undefined}
+                      aria-label={collapsed ? item.label : undefined}
+                      title={collapsed ? item.label : undefined}
+                      className={`nav-item min-h-11 ${collapsed ? 'justify-center px-0' : ''}`}
+                    >
+                      <item.icon className="size-[18px] shrink-0" aria-hidden="true" />
+                      {!collapsed && <span className="truncate">{item.label}</span>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </nav>
+
+        <div className="shrink-0 space-y-1 border-t border-border p-3">
+          {isDesktop && (
+            <button
+              type="button"
+              onClick={onToggle}
+              className={`nav-item min-h-10 ${collapsed ? 'justify-center px-0' : ''}`}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-expanded={!collapsed}
+              title={collapsed ? 'Expand sidebar' : undefined}
             >
-              my<span className="text-blue-500">Cam</span>
-            </motion.span>
+              {collapsed ? <ChevronRight className="size-[18px]" aria-hidden="true" /> : <><ChevronLeft className="size-[18px]" aria-hidden="true" /><span>Collapse</span></>}
+            </button>
           )}
+          <button
+            type="button"
+            onClick={onLogout}
+            aria-label={collapsed ? 'Sign out' : undefined}
+            title={collapsed ? 'Sign out' : undefined}
+            className={`btn btn-danger-subtle btn-block ${collapsed ? 'px-0' : 'justify-start'}`}
+          >
+            <LogOut className="size-4 shrink-0" aria-hidden="true" />
+            {!collapsed && <span>Sign out</span>}
+          </button>
         </div>
-        
-        {/* Toggle Collapse Button */}
-        <button 
-          onClick={onToggle}
-          className="bg-white/[0.06] border border-white/[0.1] rounded-lg p-1.5 text-slate-400 hover:text-white hover:bg-white/10 transition-all duration-200"
-          aria-label="Toggle Sidebar"
-        >
-          {isCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-        </button>
-      </div>
-
-      {/* Navigation Links */}
-      <nav className="flex-1 py-4 px-3 overflow-y-auto space-y-6">
-        {/* Main Section */}
-        <div>
-          {!isCollapsed && (
-            <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase px-3 mb-2">
-              Security Overview
-            </div>
-          )}
-          <div className="space-y-1">
-            {mainItems.map((item) => {
-              const isActive = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onTabChange(item.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 relative text-xs font-medium ${
-                    isActive 
-                      ? 'text-blue-400 bg-blue-500/10 font-semibold' 
-                      : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-100'
-                  } ${isCollapsed ? 'justify-center' : ''}`}
-                >
-                  {/* Active Left Indicator Bar */}
-                  {isActive && (
-                    <div className="absolute left-0 top-2 bottom-2 w-[3px] bg-blue-500 rounded-r-full shadow-glow-sm" />
-                  )}
-                  <item.icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-blue-400' : 'text-slate-400'}`} />
-                  {!isCollapsed && (
-                    <span className="truncate">{item.label}</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* System Section */}
-        <div>
-          {!isCollapsed && (
-            <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase px-3 mb-2">
-              Preferences
-            </div>
-          )}
-          <div className="space-y-1">
-            {systemItems.map((item) => {
-              const isActive = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onTabChange(item.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 relative text-xs font-medium ${
-                    isActive 
-                      ? 'text-blue-400 bg-blue-500/10 font-semibold' 
-                      : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-100'
-                  } ${isCollapsed ? 'justify-center' : ''}`}
-                >
-                  {isActive && (
-                    <div className="absolute left-0 top-2 bottom-2 w-[3px] bg-blue-500 rounded-r-full shadow-glow-sm" />
-                  )}
-                  <item.icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-blue-400' : 'text-slate-400'}`} />
-                  {!isCollapsed && (
-                    <span className="truncate">{item.label}</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </nav>
-
-      {/* Footer / Logout */}
-      <div className="p-3 border-t border-white/[0.07]">
-        <button 
-          onClick={onLogout}
-          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors ${
-            isCollapsed ? 'justify-center' : ''
-          }`}
-        >
-          <LogOut className="w-4 h-4 flex-shrink-0" />
-          {!isCollapsed && <span>Sign Out</span>}
-        </button>
-      </div>
-    </motion.aside>
+      </aside>
+    </>
   );
 };
 
 export default Sidebar;
-

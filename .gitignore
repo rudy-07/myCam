@@ -18,6 +18,9 @@ dist-ssr
 # Uploads
 mycloud_v0.4/uploads/*
 
+# Reference / temporary folders
+myCam-release-candidate/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

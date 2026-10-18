@@ -1,13 +1,20 @@
 /**
- * AI Motion Detection & Computer Vision Analysis Utility for myCam
- * Features: Multi-Blob Clustering, EMA Smoothing, and Point-in-Polygon Filtering
+ * Motion detection utility for myCam.
+ *
+ * IMPORTANT: this is simple frame-differencing. It compares two consecutive
+ * low-resolution frames, finds regions where pixels changed, and draws a box
+ * around them. It does NOT use a trained model and cannot tell what moved
+ * (person, vehicle, animal, shadow, lighting change...). Do not present its
+ * output as object recognition.
+ *
+ * (The filename is kept for import compatibility.)
  */
 
 // Point-in-Polygon Ray-Casting Algorithm for Activity Zone Intersection
 export const isPointInPolygon = (point, polygon) => {
     let rawPolygon = polygon;
     if (typeof rawPolygon === 'string') {
-        try { rawPolygon = JSON.parse(rawPolygon); } catch (e) { return true; }
+        try { rawPolygon = JSON.parse(rawPolygon); } catch { return true; }
     }
     if (!Array.isArray(rawPolygon) || rawPolygon.length < 3) return true;
 
@@ -28,7 +35,7 @@ export const isBoxIntersectingZone = (box, zoneCoordinates) => {
     if (!zoneCoordinates) return true;
     let coords = zoneCoordinates;
     if (typeof coords === 'string') {
-        try { coords = JSON.parse(coords); } catch (e) { return true; }
+        try { coords = JSON.parse(coords); } catch { return true; }
     }
     if (!Array.isArray(coords) || coords.length < 3) return true;
 
@@ -39,12 +46,28 @@ export const isBoxIntersectingZone = (box, zoneCoordinates) => {
     return isPointInPolygon(centroid, coords);
 };
 
-// Temporal EMA Smoothing Cache for Stable Bounding Boxes
+// Previous-frame cache and smoothed boxes (module-level, one analysed feed at a time)
 let lastFrameData = null;
 let smoothedBoxes = [];
 
-export const analyzeFrameAI = (videoElement, filterCategory = 'all') => {
-    if (!videoElement || videoElement.readyState !== 4 || !videoElement.videoWidth) {
+export const resetMotionState = () => {
+    lastFrameData = null;
+    smoothedBoxes = [];
+};
+
+/**
+ * Compare the current video frame against the previous one.
+ * Returns an array of { id, box: {x, y, width, height} } with normalised (0-1)
+ * coordinates, one per changed region of a 2x2 grid. No labels, categories or
+ * confidence values are produced because none can be derived from frame differences.
+ */
+export const analyzeFrameMotion = (videoElement, options = {}) => {
+    // Sensitivity is explicit and bounded: higher sensitivity lowers pixel and
+    // region thresholds. This remains frame-difference motion, not AI detection.
+    const sensitivity = Math.min(3, Math.max(1, Number(options.sensitivity) || 2));
+    const pixelThreshold = sensitivity === 3 ? 42 : sensitivity === 2 ? 65 : 90;
+    const minimumChangedPixels = sensitivity === 3 ? 8 : sensitivity === 2 ? 15 : 25;
+    if (!videoElement || videoElement.readyState < 2 || !videoElement.videoWidth) {
         return [];
     }
 
@@ -53,17 +76,16 @@ export const analyzeFrameAI = (videoElement, filterCategory = 'all') => {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(videoElement, 0, 0, width, height);
 
     const frameData = ctx.getImageData(0, 0, width, height);
-    const rawDetections = [];
+    const rawRegions = [];
 
     if (lastFrameData) {
         const data1 = lastFrameData.data;
         const data2 = frameData.data;
 
-        // Grid-based Motion Clustering (4 quadrants to separate multiple objects)
         const gridCols = 2;
         const gridRows = 2;
         const cellW = width / gridCols;
@@ -86,7 +108,7 @@ export const analyzeFrameAI = (videoElement, filterCategory = 'all') => {
                                      Math.abs(data1[idx+1] - data2[idx+1]) +
                                      Math.abs(data1[idx+2] - data2[idx+2]);
 
-                        if (diff > 65) {
+                        if (diff > pixelThreshold) {
                             motionPixels++;
                             if (x < minX) minX = x;
                             if (x > maxX) maxX = x;
@@ -96,38 +118,16 @@ export const analyzeFrameAI = (videoElement, filterCategory = 'all') => {
                     }
                 }
 
-                if (motionPixels > 15 && maxX > minX && maxY > minY) {
-                    const normX = minX / width;
-                    const normY = minY / height;
-                    const normW = Math.max(0.12, (maxX - minX) / width);
-                    const normH = Math.max(0.18, (maxY - minY) / height);
-
-                    const aspectRatio = normW / (normH || 0.01);
-                    let label = 'Person';
-                    let confidence = Math.min(0.98, 0.82 + (motionPixels / 300));
-
-                    if (aspectRatio > 1.25) {
-                        label = 'Vehicle';
-                        confidence = Math.min(0.96, 0.85 + (normW * 0.2));
-                    } else if (normH < 0.22 && normW < 0.22) {
-                        label = 'Pet';
-                        confidence = 0.88;
-                    } else {
-                        label = 'Person';
-                    }
-
-                    const matchesFilter = filterCategory === 'all' || 
-                                         (filterCategory === 'person' && label === 'Person') ||
-                                         (filterCategory === 'vehicle' && label === 'Vehicle');
-
-                    if (matchesFilter) {
-                        rawDetections.push({
-                            id: `grid-${r}-${c}`,
-                            label,
-                            confidence: Math.round(confidence * 100),
-                            box: { x: normX, y: normY, width: normW, height: normH }
-                        });
-                    }
+                if (motionPixels > minimumChangedPixels && maxX > minX && maxY > minY) {
+                    rawRegions.push({
+                        id: `grid-${r}-${c}`,
+                        box: {
+                            x: minX / width,
+                            y: minY / height,
+                            width: Math.max(0.12, (maxX - minX) / width),
+                            height: Math.max(0.18, (maxY - minY) / height)
+                        }
+                    });
                 }
             }
         }
@@ -135,12 +135,12 @@ export const analyzeFrameAI = (videoElement, filterCategory = 'all') => {
 
     lastFrameData = frameData;
 
-    // Apply EMA Smoothing across frames for steady jitter-free boxes
+    // Smooth each region against its previous position (matched by grid cell id)
     const alpha = 0.4;
-    smoothedBoxes = rawDetections.map((det, index) => {
-        const prev = smoothedBoxes[index];
-        if (!prev || prev.label !== det.label) return det;
-
+    const prevById = new Map(smoothedBoxes.map(d => [d.id, d]));
+    smoothedBoxes = rawRegions.map((det) => {
+        const prev = prevById.get(det.id);
+        if (!prev) return det;
         return {
             ...det,
             box: {

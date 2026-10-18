@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import io from 'socket.io-client';
-import { Camera, Mic, MicOff, Video, VideoOff, Bell } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Bell, Users } from 'lucide-react';
 import { SOCKET_URL } from '../config';
-
-const peerConnections = {};
+import { getAuthToken } from '../lib/api';
+import { loadIceServers } from '../lib/rtcConfig';
+import { Button, StatusBadge } from './ui';
 
 const RESOLUTION_PRESETS = {
     '4K': { width: { ideal: 3840 }, height: { ideal: 2160 } },
@@ -11,22 +12,25 @@ const RESOLUTION_PRESETS = {
     'SD': { width: { ideal: 854 }, height: { ideal: 480 } }
 };
 
+const BITRATE_MAP = { '4K': 8000000, 'HD': 3000000, 'SD': 800000 };
+
 const Broadcaster = () => {
     const videoRef = useRef(null);
-    const remoteAudioRef = useRef(null);
-    const socketRef = useRef();
-    const [status, setStatus] = useState('Initializing...');
+    const socketRef = useRef(null);
+    const peerConnectionsRef = useRef({});
+    const [cameraState, setCameraState] = useState('starting'); // starting | ready | error
+    const [cameraError, setCameraError] = useState('');
+    const [socketState, setSocketState] = useState('connecting'); // connecting | connected | error
+    const [viewerCount, setViewerCount] = useState(0);
     const [audioEnabled, setAudioEnabled] = useState(true);
     const [videoEnabled, setVideoEnabled] = useState(true);
     const [quality, setQuality] = useState('HD');
-    const [incomingAudioActive, setIncomingAudioActive] = useState(false);
     const [motionAlert, setMotionAlert] = useState(false);
 
     const applyQualityConstraints = async (newQuality) => {
         setQuality(newQuality);
         const stream = videoRef.current?.srcObject;
-        const bitrateMap = { '4K': 8000000, 'HD': 3000000, 'SD': 800000 };
-        const targetBitrate = bitrateMap[newQuality] || 3000000;
+        const targetBitrate = BITRATE_MAP[newQuality] || 3000000;
 
         if (stream) {
             const videoTrack = stream.getVideoTracks()[0];
@@ -39,8 +43,8 @@ const Broadcaster = () => {
             }
         }
 
-        // Dynamically update RTCPeerConnection sender maxBitrate for active watchers
-        Object.values(peerConnections).forEach(pc => {
+        // Update RTCPeerConnection sender maxBitrate for active watchers
+        Object.values(peerConnectionsRef.current).forEach(pc => {
             if (!pc) return;
             pc.getSenders().forEach(sender => {
                 if (sender.track && sender.track.kind === 'video') {
@@ -57,135 +61,191 @@ const Broadcaster = () => {
                 }
             });
         });
-
-        setStatus(`Broadcasting (${newQuality})`);
     };
+    // Keep the latest handler reachable from the socket listener without re-subscribing.
+    const applyQualityRef = useRef(applyQualityConstraints);
+    useEffect(() => { applyQualityRef.current = applyQualityConstraints; });
 
     useEffect(() => {
-        socketRef.current = io(SOCKET_URL);
-        
-        const socket = socketRef.current;
+        const params = new URLSearchParams(window.location.search);
+        const requestedCameraId = params.get('cameraId');
+        const cameraId = requestedCameraId && /^[A-Za-z0-9._:-]{1,50}$/.test(requestedCameraId) ? requestedCameraId : 'mobile';
+        const socket = io(SOCKET_URL, { auth: { token: getAuthToken(), cameraId } });
+        socketRef.current = socket;
+        const peers = peerConnectionsRef.current;
+        const pendingCandidates = {};
+        const disconnectTimers = {};
+        const iceServersPromise = loadIceServers();
+        let stream = null;
+        let motionInterval = null;
+        let motionTimeout = null;
+        let cancelled = false;
 
-        const getCamera = async () => {
-             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: RESOLUTION_PRESETS.HD, 
-                    audio: true 
-                });
-                if (videoRef.current) {
-                    videoRef.current.srcObject = stream;
+        const syncViewerCount = () => setViewerCount(Object.keys(peers).length);
+
+        const dropPeer = (id) => {
+            if (peers[id]) {
+                peers[id].onconnectionstatechange = null;
+                peers[id].onicecandidate = null;
+                peers[id].close();
+                delete peers[id];
+                delete pendingCandidates[id];
+                if (disconnectTimers[id]) clearTimeout(disconnectTimers[id]);
+                delete disconnectTimers[id];
+                syncViewerCount();
+            }
+        };
+
+        socket.on('connect', () => {
+            setSocketState('connected');
+            // (Re)announce so viewers know a broadcaster is available.
+            if (stream) socket.emit('broadcaster', cameraId);
+        });
+        socket.on('connect_error', () => setSocketState('error'));
+        socket.on('disconnect', () => setSocketState('connecting'));
+
+        socket.on('watcher', async (id, requestedCameraId) => {
+            if (requestedCameraId && requestedCameraId !== cameraId) return;
+            if (!stream) return;
+            dropPeer(id); // never keep two connections for one viewer
+            let iceServers;
+            try { iceServers = await iceServersPromise; } catch { iceServers = [{ urls: 'stun:stun.l.google.com:19302' }]; }
+            if (cancelled || !stream) return;
+            const peerConnection = new RTCPeerConnection({ iceServers });
+            peers[id] = peerConnection;
+            pendingCandidates[id] = [];
+
+            stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) socket.emit('candidate', id, event.candidate);
+            };
+
+            peerConnection.onconnectionstatechange = () => {
+                if (peers[id] !== peerConnection) return;
+                if (peerConnection.connectionState === 'connected') {
+                    if (disconnectTimers[id]) clearTimeout(disconnectTimers[id]);
+                    delete disconnectTimers[id];
+                } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
+                    if (disconnectTimers[id]) clearTimeout(disconnectTimers[id]);
+                    disconnectTimers[id] = setTimeout(() => {
+                        if (peers[id] === peerConnection && ['failed', 'disconnected'].includes(peerConnection.connectionState)) dropPeer(id);
+                    }, peerConnection.connectionState === 'failed' ? 500 : 3000);
                 }
-                setStatus('Ready to Broadcast (HD)');
-                
-                socket.emit('broadcaster');
+                syncViewerCount();
+            };
 
-                socket.on('watcher', id => {
-                    const peerConnection = new RTCPeerConnection({
-                        iceServers: [
-                            { urls: 'stun:stun.l.google.com:19302' }
-                        ]
-                    });
+            peerConnection.createOffer()
+                .then(sdp => peerConnection.setLocalDescription(sdp))
+                .then(() => socket.emit('offer', id, peerConnection.localDescription))
+                .catch(err => { console.error('[Broadcaster] Offer failed:', err); dropPeer(id); });
 
-                    peerConnections[id] = peerConnection;
+            syncViewerCount();
+        });
 
-                    stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+        socket.on('answer', async (id, description) => {
+            const peer = peers[id];
+            if (!peer) return;
+            try {
+                await peer.setRemoteDescription(description);
+                for (const candidate of pendingCandidates[id] || []) {
+                    try { await peer.addIceCandidate(new RTCIceCandidate(candidate)); }
+                    catch (err) { console.warn('[Broadcaster] Queued ICE candidate rejected:', err); }
+                }
+                pendingCandidates[id] = [];
+            } catch (err) { console.warn('[Broadcaster] Bad answer:', err); }
+        });
 
-                    // Listen for incoming audio track from watcher (Two-Way Communication)
-                    peerConnection.ontrack = (event) => {
-                        console.log('[Broadcaster] Received incoming track from watcher:', event.track.kind);
-                        if (event.track.kind === 'audio' && remoteAudioRef.current) {
-                            remoteAudioRef.current.srcObject = event.streams[0];
-                            setIncomingAudioActive(true);
-                        }
-                    };
+        socket.on('candidate', async (id, candidate) => {
+            const peer = peers[id];
+            if (!peer) return;
+            if (!peer.remoteDescription) {
+                (pendingCandidates[id] ||= []).push(candidate);
+                return;
+            }
+            try { await peer.addIceCandidate(new RTCIceCandidate(candidate)); }
+            catch (err) { console.warn('[Broadcaster] ICE candidate rejected:', err); }
+        });
 
-                    peerConnection.onicecandidate = event => {
-                        if (event.candidate) {
-                            socket.emit('candidate', id, event.candidate);
-                        }
-                    };
+        socket.on('change-quality', (requestedQuality) => {
+            if (RESOLUTION_PRESETS[requestedQuality]) applyQualityRef.current(requestedQuality);
+        });
 
-                    peerConnection.createOffer()
-                    .then(sdp => peerConnection.setLocalDescription(sdp))
-                    .then(() => {
-                        socket.emit('offer', id, peerConnection.localDescription);
-                    });
-                });
+        socket.on('disconnectPeer', dropPeer);
 
-                socket.on('answer', (id, description) => {
-                    peerConnections[id] && peerConnections[id].setRemoteDescription(description);
-                });
+        const startCamera = async () => {
+            if (!navigator.mediaDevices?.getUserMedia) {
+                setCameraState('error');
+                setCameraError('This browser cannot access a camera (getUserMedia is unavailable). Camera access usually requires HTTPS.');
+                return;
+            }
+            try {
+                const media = await navigator.mediaDevices.getUserMedia({ video: RESOLUTION_PRESETS.HD, audio: true });
+                if (cancelled) { media.getTracks().forEach(t => t.stop()); return; }
+                stream = media;
+                if (videoRef.current) videoRef.current.srcObject = stream;
+                setCameraState('ready');
+                socket.emit('broadcaster', cameraId);
 
-                socket.on('candidate', (id, candidate) => {
-                    peerConnections[id] && peerConnections[id].addIceCandidate(new RTCIceCandidate(candidate));
-                });
-
-                socket.on('change-quality', (requestedQuality) => {
-                    console.log('[Broadcaster] Quality change requested by viewer:', requestedQuality);
-                    applyQualityConstraints(requestedQuality);
-                });
-
-                socket.on('disconnectPeer', id => {
-                    if (peerConnections[id]) {
-                        peerConnections[id].close();
-                        delete peerConnections[id];
-                    }
-                });
-
-                window.onunload = window.onbeforeunload = () => {
-                    socket.close();
-                };
-
-                // Motion Detection Loop (Samples frame every 500ms)
+                // Motion detection by frame differencing: samples a frame every 500ms.
                 const motionCanvas = document.createElement('canvas');
                 motionCanvas.width = 160;
                 motionCanvas.height = 90;
-                const motionCtx = motionCanvas.getContext('2d');
+                const motionCtx = motionCanvas.getContext('2d', { willReadFrequently: true });
                 let lastFrameData = null;
                 let lastAlertTime = 0;
 
-                const motionInterval = setInterval(() => {
+                motionInterval = setInterval(() => {
                     if (!videoRef.current || videoRef.current.readyState !== 4) return;
                     motionCtx.drawImage(videoRef.current, 0, 0, 160, 90);
                     const currentFrame = motionCtx.getImageData(0, 0, 160, 90);
-                    
+
                     if (lastFrameData) {
                         let diffPixels = 0;
                         const data1 = lastFrameData.data;
                         const data2 = currentFrame.data;
-                        for (let i = 0; i < data1.length; i += 16) { // sample every 4th pixel
+                        for (let i = 0; i < data1.length; i += 16) {
                             const diff = Math.abs(data1[i] - data2[i]) + Math.abs(data1[i+1] - data2[i+1]) + Math.abs(data1[i+2] - data2[i+2]);
                             if (diff > 100) diffPixels++;
                         }
-                        
-                        // If more than 5% pixels changed and 5s cooled down
+
                         if (diffPixels > 100 && (Date.now() - lastAlertTime > 5000)) {
                             lastAlertTime = Date.now();
                             setMotionAlert(true);
-                            socket.emit('motion-detected', { cameraId: 'CAM-MOBILE' });
-                            setTimeout(() => setMotionAlert(false), 3000);
+                            socket.emit('motion-detected', { cameraId });
+                            clearTimeout(motionTimeout);
+                            motionTimeout = setTimeout(() => setMotionAlert(false), 3000);
                         }
                     }
                     lastFrameData = currentFrame;
                 }, 500);
-
-                return () => {
-                    clearInterval(motionInterval);
-                };
-
-             } catch (error) {
+            } catch (error) {
+                if (cancelled) return;
                 console.error(error);
-                setStatus('Error accessing camera: ' + error.message);
-             }
+                setCameraState('error');
+                setCameraError(error.name === 'NotAllowedError'
+                    ? 'Camera or microphone permission was denied. Allow access in the browser and reopen this tab.'
+                    : error.message || 'The camera could not be started.');
+            }
         };
 
-        getCamera();
+        startCamera();
 
+        return () => {
+            cancelled = true;
+            clearInterval(motionInterval);
+            clearTimeout(motionTimeout);
+            Object.keys(peers).forEach(dropPeer);
+            if (stream) stream.getTracks().forEach(t => t.stop());
+            socket.off();
+            socket.disconnect();
+            socketRef.current = null;
+        };
     }, []);
 
     const toggleAudio = () => {
         const stream = videoRef.current?.srcObject;
-        if(stream) {
+        if (stream) {
             stream.getAudioTracks().forEach(track => track.enabled = !audioEnabled);
             setAudioEnabled(!audioEnabled);
         }
@@ -193,85 +253,95 @@ const Broadcaster = () => {
 
     const toggleVideo = () => {
         const stream = videoRef.current?.srcObject;
-        if(stream) {
+        if (stream) {
             stream.getVideoTracks().forEach(track => track.enabled = !videoEnabled);
             setVideoEnabled(!videoEnabled);
         }
     };
 
-    return (
-        <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4">
-            {/* Hidden audio element for receiving two-way audio from viewer */}
-            <audio ref={remoteAudioRef} autoPlay />
+    const broadcasting = cameraState === 'ready' && socketState === 'connected';
+    let badge;
+    if (cameraState === 'error') badge = { status: 'error', label: 'Camera error' };
+    else if (socketState === 'error') badge = { status: 'error', label: 'Server unreachable' };
+    else if (broadcasting) badge = { status: 'live', label: 'Broadcasting' };
+    else badge = { status: 'connecting', label: 'Starting' };
 
-            <div className="absolute top-4 left-4 flex items-center gap-3">
-                <div className="bg-red-600 px-3 py-1 rounded-full animate-pulse font-bold text-white text-sm">
-                    LIVE
-                </div>
-                {incomingAudioActive && (
-                    <div className="bg-green-600 px-3 py-1 rounded-full text-white text-xs font-semibold flex items-center gap-1 animate-pulse">
-                        <Mic className="w-3.5 h-3.5" /> Viewer Audio Active
-                    </div>
+    let statusText;
+    if (cameraState === 'error') statusText = cameraError;
+    else if (cameraState === 'starting') statusText = 'Waiting for camera permission…';
+    else if (socketState === 'error') statusText = 'Camera is on, but the signalling server cannot be reached, so viewers cannot connect.';
+    else if (socketState === 'connecting') statusText = 'Camera is on. Connecting to the signalling server…';
+    else statusText = `Broadcasting (${quality}) · ${viewerCount} viewer${viewerCount === 1 ? '' : 's'} connected`;
+
+    const hasProblem = cameraState === 'error' || socketState === 'error';
+
+    return (
+        <div className="mx-auto flex max-w-4xl flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge status={badge.status} label={badge.label} pulse={broadcasting} />
+                {broadcasting && (
+                    <span className="badge badge-neutral"><Users className="size-3.5" aria-hidden="true" /> {viewerCount} viewer{viewerCount === 1 ? '' : 's'}</span>
                 )}
                 {motionAlert && (
-                    <div className="bg-yellow-500 text-black font-bold px-3 py-1 rounded-full text-xs flex items-center gap-1 animate-bounce shadow-lg">
-                        <Bell className="w-3.5 h-3.5 fill-current" /> MOTION DETECTED!
-                    </div>
+                    <span className="badge badge-warning" role="status"><Bell className="size-3.5" aria-hidden="true" /> Motion detected</span>
                 )}
             </div>
-            
-            <div className="w-full max-w-4xl bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl relative">
-                <video 
-                    ref={videoRef} 
-                    autoPlay 
-                    playsInline 
-                    muted 
-                    className="w-full h-full object-cover aspect-video"
+
+            <div className="card relative overflow-hidden">
+                <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="aspect-video w-full bg-surface-sunken object-cover"
                 />
-                
-                <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/80 to-transparent flex items-center justify-between">
-                    <div>
-                        <h1 className="text-white font-bold text-lg">Broadcasting as CAM-MOBILE</h1>
-                        <p className="text-slate-400 text-sm">{status}</p>
+                {cameraState !== 'ready' && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-surface-sunken p-6 text-center" role="status">
+                        <p className={`max-w-md text-small ${cameraState === 'error' ? 'text-danger' : 'text-fg-muted'}`}>
+                            {cameraState === 'error' ? cameraError : 'Waiting for camera permission…'}
+                        </p>
+                    </div>
+                )}
+
+                <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-center justify-between gap-4 bg-gradient-to-t from-background/90 to-transparent p-4 sm:p-6">
+                    <div className="max-w-md">
+                        <h2 className="section-title">Broadcasting as CAM-MOBILE</h2>
+                        <p className={`text-small ${hasProblem ? 'text-danger' : 'text-fg-muted'}`}>{statusText}</p>
                     </div>
 
-                    <div className="flex gap-4 items-center">
-                        <button 
-                            onClick={() => {
-                                setMotionAlert(true);
-                                socketRef.current?.emit('motion-detected', { cameraId: 'CAM-MOBILE' });
-                                setTimeout(() => setMotionAlert(false), 3000);
-                            }}
-                            className="p-3 bg-yellow-500 hover:bg-yellow-400 text-black rounded-full transition-colors font-bold flex items-center justify-center shadow-lg"
-                            title="Trigger Motion Alert"
-                        >
-                            <Bell className="w-5 h-5 fill-current" />
-                        </button>
-
-                        <select 
+                    <div className="flex items-center gap-2">
+                        <select
                             value={quality}
                             onChange={(e) => applyQualityConstraints(e.target.value)}
-                            className="bg-black/60 text-white text-sm border border-slate-700 rounded-xl px-3 py-2 outline-none"
+                            disabled={cameraState !== 'ready'}
+                            className="select !min-h-10 !w-auto"
+                            aria-label="Broadcast quality"
                         >
-                            <option value="4K">4K Quality</option>
+                            <option value="4K">4K quality</option>
                             <option value="HD">1080p HD</option>
                             <option value="SD">SD (480p)</option>
                         </select>
 
-                        <button 
+                        <Button
+                            iconOnly
+                            variant={audioEnabled ? 'secondary' : 'danger'}
+                            icon={audioEnabled ? Mic : MicOff}
                             onClick={toggleAudio}
-                            className={`p-3 rounded-full ${audioEnabled ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-red-500 text-white hover:bg-red-600'}`}
-                            title="Toggle Mic"
-                        >
-                            {audioEnabled ? <Mic /> : <MicOff />}
-                        </button>
-                        <button 
+                            disabled={cameraState !== 'ready'}
+                            aria-pressed={!audioEnabled}
+                            title={audioEnabled ? "Mute this device's microphone in the broadcast" : "Unmute this device's microphone in the broadcast"}
+                            aria-label={audioEnabled ? 'Mute broadcast microphone' : 'Unmute broadcast microphone'}
+                        />
+                        <Button
+                            iconOnly
+                            variant={videoEnabled ? 'secondary' : 'danger'}
+                            icon={videoEnabled ? Video : VideoOff}
                             onClick={toggleVideo}
-                            className={`p-3 rounded-full ${videoEnabled ? 'bg-slate-700 text-white hover:bg-slate-600' : 'bg-red-500 text-white hover:bg-red-600'}`}
-                            title="Toggle Video"
-                        >
-                            {videoEnabled ? <Video /> : <VideoOff />}
-                        </button>
+                            disabled={cameraState !== 'ready'}
+                            aria-pressed={!videoEnabled}
+                            title={videoEnabled ? 'Turn camera video off' : 'Turn camera video on'}
+                            aria-label={videoEnabled ? 'Turn camera video off' : 'Turn camera video on'}
+                        />
                     </div>
                 </div>
             </div>

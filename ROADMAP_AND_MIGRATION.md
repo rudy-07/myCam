@@ -27,7 +27,7 @@ Currently, `myCam` references a local legacy directory (`mycloud_v0.4/`) for fil
 
 ## 2. Feature Implementation Status
 
-### 🟢 Fully Implemented Features (100% Complete)
+### Fully Implemented Features (100% Complete)
 
 | Feature | Implementation Details |
 | :--- | :--- |
@@ -46,5 +46,5 @@ Currently, `myCam` references a local legacy directory (`mycloud_v0.4/`) for fil
 
 ---
 
-### 🎉 All Core Features Implemented!
+### All Core Features Implemented!
 All 14 core features requested for **myCam** have been successfully built, verified, and documented.
