@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import io from 'socket.io-client';
-import { Mic, MicOff, Video, VideoOff, Bell, Users } from 'lucide-react';
-import { SOCKET_URL } from '../config';
-import { getAuthToken } from '../lib/api';
+import { Mic, MicOff, Video, VideoOff, Bell, Users, Camera, Plus, Check } from 'lucide-react';
+import { API_BASE, SOCKET_URL } from '../config';
+import { authFetch, getAuthToken, readErrorMessage } from '../lib/api';
 import { loadIceServers } from '../lib/rtcConfig';
 import { Button, StatusBadge } from './ui';
+import { cameraLabel, BROADCASTER_ID, BROADCASTER_LABEL } from '../lib/cameras';
 
 const RESOLUTION_PRESETS = {
     '4K': { width: { ideal: 3840 }, height: { ideal: 2160 } },
@@ -26,6 +27,53 @@ const Broadcaster = () => {
     const [videoEnabled, setVideoEnabled] = useState(true);
     const [quality, setQuality] = useState('HD');
     const [motionAlert, setMotionAlert] = useState(false);
+    const [cameras, setCameras] = useState([]);
+    const [activeCameraId, setActiveCameraId] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const requested = new URLSearchParams(window.location.search).get('cameraId');
+            if (requested && /^[A-Za-z0-9._:-]{1,50}$/.test(requested)) return requested;
+        }
+        return BROADCASTER_ID;
+    });
+    const [isCreatingCamera, setIsCreatingCamera] = useState(false);
+    const [newCameraName, setNewCameraName] = useState('');
+    const [creatingError, setCreatingError] = useState('');
+
+    const loadCameras = useCallback(async () => {
+        try {
+            const res = await authFetch(`${API_BASE}/api/cameras`);
+            if (res.ok) {
+                const data = await res.json();
+                if (Array.isArray(data)) setCameras(data);
+            }
+        } catch { /* ignore */ }
+    }, []);
+
+    useEffect(() => {
+        loadCameras();
+    }, [loadCameras]);
+
+    const handleCreateCamera = async (e) => {
+        e?.preventDefault();
+        const trimmed = newCameraName.trim();
+        if (!trimmed) return;
+        setCreatingError('');
+        try {
+            const res = await authFetch(`${API_BASE}/api/cameras`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: trimmed }),
+            });
+            if (!res.ok) throw new Error(await readErrorMessage(res));
+            const created = await res.json();
+            setCameras((prev) => [...prev, created]);
+            setActiveCameraId(created.id);
+            setNewCameraName('');
+            setIsCreatingCamera(false);
+        } catch (err) {
+            setCreatingError(err.message || 'Could not register camera.');
+        }
+    };
 
     const applyQualityConstraints = async (newQuality) => {
         setQuality(newQuality);
@@ -67,9 +115,7 @@ const Broadcaster = () => {
     useEffect(() => { applyQualityRef.current = applyQualityConstraints; });
 
     useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
-        const requestedCameraId = params.get('cameraId');
-        const cameraId = requestedCameraId && /^[A-Za-z0-9._:-]{1,50}$/.test(requestedCameraId) ? requestedCameraId : 'mobile';
+        const cameraId = activeCameraId || 'mobile';
         const socket = io(SOCKET_URL, { auth: { token: getAuthToken(), cameraId } });
         socketRef.current = socket;
         const peers = peerConnectionsRef.current;
@@ -241,7 +287,7 @@ const Broadcaster = () => {
             socket.disconnect();
             socketRef.current = null;
         };
-    }, []);
+    }, [activeCameraId]);
 
     const toggleAudio = () => {
         const stream = videoRef.current?.srcObject;
@@ -273,10 +319,62 @@ const Broadcaster = () => {
     else if (socketState === 'connecting') statusText = 'Camera is on. Connecting to the signalling server…';
     else statusText = `Broadcasting (${quality}) · ${viewerCount} viewer${viewerCount === 1 ? '' : 's'} connected`;
 
+    const activeCamera = cameras.find((c) => String(c.id) === String(activeCameraId));
     const hasProblem = cameraState === 'error' || socketState === 'error';
 
     return (
         <div className="mx-auto flex max-w-4xl flex-col gap-4">
+            {/* Camera Source Selector */}
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface p-3.5 shadow-sm">
+                <div className="flex flex-wrap items-center gap-2.5">
+                    <Camera className="size-4 text-accent" aria-hidden="true" />
+                    <label htmlFor="broadcaster-camera-select" className="text-small font-medium text-fg">Broadcast as:</label>
+                    <select
+                        id="broadcaster-camera-select"
+                        value={activeCameraId}
+                        onChange={(e) => setActiveCameraId(e.target.value)}
+                        className="select select-sm min-w-[200px]"
+                    >
+                        {cameras.length === 0 ? (
+                            <option value={BROADCASTER_ID}>{BROADCASTER_LABEL}</option>
+                        ) : (
+                            cameras.map((c) => (
+                                <option key={c.id} value={c.id}>{c.name || cameraLabel(c.id)}</option>
+                            ))
+                        )}
+                    </select>
+
+                    {!isCreatingCamera ? (
+                        <Button
+                            size="sm"
+                            variant="secondary"
+                            icon={Plus}
+                            onClick={() => setIsCreatingCamera(true)}
+                        >
+                            New camera
+                        </Button>
+                    ) : (
+                        <form onSubmit={handleCreateCamera} className="flex items-center gap-2">
+                            <input
+                                type="text"
+                                className="input input-sm min-w-[140px]"
+                                placeholder="Camera name"
+                                value={newCameraName}
+                                onChange={(e) => setNewCameraName(e.target.value)}
+                                autoFocus
+                            />
+                            <Button size="sm" variant="primary" icon={Check} type="submit">
+                                Create
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => { setIsCreatingCamera(false); setNewCameraName(''); }}>
+                                Cancel
+                            </Button>
+                        </form>
+                    )}
+                </div>
+                {creatingError && <span className="text-xs text-danger">{creatingError}</span>}
+            </div>
+
             <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge status={badge.status} label={badge.label} pulse={broadcasting} />
                 {broadcasting && (
@@ -305,7 +403,7 @@ const Broadcaster = () => {
 
                 <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-center justify-between gap-4 bg-gradient-to-t from-background/90 to-transparent p-4 sm:p-6">
                     <div className="max-w-md">
-                        <h2 className="section-title">Broadcasting as CAM-MOBILE</h2>
+                        <h2 className="section-title">Broadcasting as {activeCamera?.name || cameraLabel(activeCameraId)}</h2>
                         <p className={`text-small ${hasProblem ? 'text-danger' : 'text-fg-muted'}`}>{statusText}</p>
                     </div>
 

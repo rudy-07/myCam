@@ -116,7 +116,7 @@ router.post('/register', rateLimit({ max: 5 }), async (req, res) => {
 
 // Forgot Password Endpoint
 router.post('/forgot-password', rateLimit({ max: 5 }), async (req, res) => {
-  const { email } = req.body;
+  const email = (req.body?.email || '').trim();
   if (!email) return res.status(400).json({ message: 'Email is required' });
 
   try {
@@ -124,7 +124,7 @@ router.post('/forgot-password', rateLimit({ max: 5 }), async (req, res) => {
     // Fetch recipient name if available
     let recipientName = 'Operator';
     try {
-      const [rows] = await pool.execute('SELECT name FROM users WHERE email = ? LIMIT 1', [email]);
+      const [rows] = await pool.execute('SELECT name FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1', [email]);
       if (rows.length && rows[0].name) recipientName = rows[0].name;
     } catch (e) {
       /* ignore */
@@ -134,6 +134,7 @@ router.post('/forgot-password', rateLimit({ max: 5 }), async (req, res) => {
     await emailService.sendPasswordResetEmail(email, recipientName, token, req);
     res.json({ message: 'If an account exists, a reset link has been requested.' });
   } catch (err) {
+    console.warn('[Forgot Password Notice]:', err.message);
     // Keep the public response identical for unknown accounts and internal failures.
     res.json({ message: 'If an account exists, a reset link has been requested.' });
   }

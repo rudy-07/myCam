@@ -128,6 +128,7 @@ const registerUser = async (name, username, email, password) => {
         
         try {
             let newUserId;
+            let sql = 'INSERT INTO users (username, email, password, name, is_verified, created_at) VALUES (?, ?, ?, ?, 1, NOW())';
             try {
               const [result] = await db.execute(sql, [username, email, hashedPassword, name]);
               newUserId = result.insertId;
@@ -151,16 +152,18 @@ const registerUser = async (name, username, email, password) => {
 };
 
 const createPasswordResetToken = async (email) => {
-  // Check if user exists first
-  const [users] = await db.execute('SELECT * FROM users WHERE email = ?', [email]);
+  const cleanEmail = (typeof email === 'string' ? email.trim() : '');
+  // Check if user exists first (case-insensitive)
+  const [users] = await db.execute('SELECT * FROM users WHERE LOWER(email) = LOWER(?)', [cleanEmail]);
   if (users.length === 0) throw new Error('User not found');
+  const targetEmail = users[0].email || cleanEmail;
 
   const token = crypto.randomBytes(32).toString('hex');
   const expiry = new Date(Date.now() + 3600000); // 1 hour
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
   const sql = 'INSERT INTO password_resets (email, token, expires_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE token = ?, expires_at = ?';
-  await db.execute(sql, [email, tokenHash, expiry, tokenHash, expiry]);
+  await db.execute(sql, [targetEmail, tokenHash, expiry, tokenHash, expiry]);
   
   return token;
 };

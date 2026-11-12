@@ -20,11 +20,11 @@ const PRESETS = [
  *             so editing never alters the enabled state)
  * The modal stays open, with the entered values, until the server confirms the save.
  */
-const ScheduleFormModal = ({ user, schedule, onClose, onSaved }) => {
+const ScheduleFormModal = ({ user, schedule, onClose, onSaved, cameras = [] }) => {
   const editing = Boolean(schedule);
   const [form, setForm] = useState(() => ({
     name: schedule?.name ?? '',
-    camera_id: schedule?.camera_id ?? BROADCASTER_ID,
+    camera_id: schedule?.camera_id ?? (cameras[0]?.id || BROADCASTER_ID),
     days: schedule ? parseDays(schedule.days_json).days : [...DAYS],
     start_time: schedule ? toHHMM(schedule.start_time) : '22:00',
     end_time: schedule ? toHHMM(schedule.end_time) : '06:00',
@@ -89,9 +89,17 @@ const ScheduleFormModal = ({ user, schedule, onClose, onSaved }) => {
             onChange={(e) => set({ name: e.target.value })} placeholder="e.g. Night watch or weekend guard" />
         </Field>
 
-        <Field label="Target camera" help={editing ? 'The camera cannot be changed after a schedule is created.' : 'Only the connected mobile broadcaster is available.'}>
+        <Field label="Target camera" help={editing ? 'The camera cannot be changed after a schedule is created.' : 'Select which camera to schedule recordings for.'}>
           <select className="select" value={form.camera_id} disabled={editing} onChange={(e) => set({ camera_id: e.target.value })}>
-            <option value={form.camera_id}>{editing ? cameraLabel(form.camera_id) : BROADCASTER_LABEL}</option>
+            {editing ? (
+              <option value={form.camera_id}>{cameraLabel(form.camera_id)}</option>
+            ) : cameras && cameras.length > 0 ? (
+              cameras.map((c) => (
+                <option key={c.id} value={c.id}>{c.name || cameraLabel(c.id)}</option>
+              ))
+            ) : (
+              <option value={form.camera_id}>{BROADCASTER_LABEL}</option>
+            )}
           </select>
         </Field>
 

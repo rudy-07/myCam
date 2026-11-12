@@ -702,7 +702,7 @@ const CameraModal = ({ user, camera, onClose, onNavigate, children }) => {
                   variant="ghost"
                   size="sm"
                   icon={Sliders}
-                  onClick={() => { onClose(); onNavigate('zones'); }}
+                  onClick={() => { onClose(); onNavigate('activity'); }}
                   className="w-full justify-center text-xs text-accent hover:text-accent"
                 >
                   Configure Activity Zones

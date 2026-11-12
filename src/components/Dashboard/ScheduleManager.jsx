@@ -14,6 +14,8 @@ const ScheduleManager = ({ user }) => {
   const userId = user?.id;
   const res = useApiResource(userId ? `${API_BASE}/api/schedules?user_id=${userId}` : null, requireArray);
   const schedules = res.data;
+  const camerasRes = useApiResource(userId ? `${API_BASE}/api/cameras` : null, requireArray);
+  const cameras = camerasRes.data || [];
 
   const [formState, setFormState] = useState(null); // { schedule } | null  (schedule undefined = create)
   const [pendingToggle, setPendingToggle] = useState(null);
@@ -158,7 +160,7 @@ const ScheduleManager = ({ user }) => {
                         {open && <span className="badge badge-neutral"><Clock className="size-3.5" aria-hidden="true" />Window open now</span>}
                       </div>
                       <h3 className="section-title mt-2 break-words [overflow-wrap:anywhere]">{sch.name}</h3>
-                      <p className="meta-text mt-0.5">{cameraLabel(sch.camera_id)}</p>
+                      <p className="meta-text mt-0.5">{cameras.find((c) => String(c.id) === String(sch.camera_id))?.name || cameraLabel(sch.camera_id)}</p>
                     </div>
 
                     <div className="rounded-control border border-border bg-surface-sunken p-3">
@@ -215,7 +217,7 @@ const ScheduleManager = ({ user }) => {
       )}
 
       {formState && (
-        <ScheduleFormModal user={user} schedule={formState.schedule} onClose={() => setFormState(null)} onSaved={handleSaved} />
+        <ScheduleFormModal user={user} schedule={formState.schedule} cameras={cameras} onClose={() => setFormState(null)} onSaved={handleSaved} />
       )}
 
       {confirm && (

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import CameraFeed from './CameraFeed';
-import { BROADCASTER_ID, BROADCASTER_LABEL } from '../../lib/cameras';
+import { BROADCASTER_ID, BROADCASTER_LABEL, cameraLabel } from '../../lib/cameras';
 import { parseCoordinates, containRect, toNormalized, fromNormalized } from '../../lib/zones';
 import { CAMERA_STATUS } from '../../lib/cameraStatus';
 
@@ -18,7 +18,7 @@ const COLORS = { saved: '#57d6a3', draft: '#8bb8ff' };
  * Pointer events only (one handler for mouse, touch and pen) so a tap can never
  * register twice. The canvas is also operable from the keyboard.
  */
-const ZoneStage = ({ zones, drawing, points, onAddPoint, onUndo, onStatusChange, describedBy }) => {
+const ZoneStage = ({ zones, drawing, points, onAddPoint, onUndo, onStatusChange, describedBy, cameraId = BROADCASTER_ID, cameraName = '' }) => {
   const stageRef = useRef(null);
   const canvasRef = useRef(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -76,7 +76,7 @@ const ZoneStage = ({ zones, drawing, points, onAddPoint, onUndo, onStatusChange,
       if (close) ctx.closePath();
     };
 
-    zones.filter((z) => z.camera_id === BROADCASTER_ID).forEach((zone) => {
+    zones.filter((z) => !cameraId || String(z.camera_id) === String(cameraId)).forEach((zone) => {
       const pts = parseCoordinates(zone.coordinates_json);
       if (!pts || pts.length < 3) return;
       path(pts, true);
@@ -122,7 +122,7 @@ const ZoneStage = ({ zones, drawing, points, onAddPoint, onUndo, onStatusChange,
       ctx.moveTo(q.x, q.y - 11); ctx.lineTo(q.x, q.y + 11);
       ctx.stroke();
     }
-  }, [size, rect, live, zones, points, drawing, kbActive, cursor]);
+  }, [size, rect, live, zones, points, drawing, kbActive, cursor, cameraId]);
 
   const handlePointerDown = (e) => {
     if (!canPlace) return;
@@ -151,7 +151,7 @@ const ZoneStage = ({ zones, drawing, points, onAddPoint, onUndo, onStatusChange,
   return (
     <div ref={stageRef} className="card relative aspect-video overflow-hidden bg-surface-sunken">
       <div className="absolute inset-0 pointer-events-none">
-        <CameraFeed feedKey={BROADCASTER_ID} onStatusChange={handleStatus} />
+        <CameraFeed feedKey={cameraId || BROADCASTER_ID} onStatusChange={handleStatus} />
       </div>
 
       <canvas
@@ -167,7 +167,7 @@ const ZoneStage = ({ zones, drawing, points, onAddPoint, onUndo, onStatusChange,
       />
 
       <div className="pointer-events-none absolute right-2 top-2 z-20">
-        <span className="badge badge-neutral bg-background/80 backdrop-blur">{BROADCASTER_LABEL}</span>
+        <span className="badge badge-neutral bg-background/80 backdrop-blur">{cameraName || cameraLabel(cameraId)}</span>
       </div>
     </div>
   );

@@ -1,12 +1,12 @@
 import React, { useState, useRef, useCallback, useMemo } from 'react';
-import { Plus, Trash2, Save, Undo2, X, MapPinned, RefreshCw, AlertTriangle, Radio, Hexagon } from 'lucide-react';
+import { Plus, Trash2, Save, Undo2, X, MapPinned, RefreshCw, AlertTriangle, Radio, Hexagon, Camera } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { API_BASE } from '../../config';
 import { Button, Field, PageHeader, EmptyState, ConfirmDialog } from '../ui';
 import ZoneStage from './ZoneStage';
 import useApiResource, { requireArray } from '../../hooks/useApiResource';
 import { sendJson } from '../../lib/api';
-import { cameraLabel, BROADCASTER_ID } from '../../lib/cameras';
+import { cameraLabel, BROADCASTER_ID, BROADCASTER_LABEL } from '../../lib/cameras';
 import { parseCoordinates, validateDraft, MIN_POINTS, MAX_NAME_LENGTH } from '../../lib/zones';
 import { formatDateTime } from '../../lib/recordingMedia';
 import { CAMERA_STATUS } from '../../lib/cameraStatus';
@@ -18,6 +18,21 @@ const ActivityZones = ({ user, onNavigate }) => {
   const userId = user?.id;
   const zonesRes = useApiResource(userId ? `${API_BASE}/api/zones?user_id=${userId}` : null, requireArray);
   const zones = zonesRes.data;
+  const camerasRes = useApiResource(userId ? `${API_BASE}/api/cameras` : null, requireArray);
+  const rawCameras = camerasRes.data;
+  const cameras = useMemo(() => (Array.isArray(rawCameras) ? rawCameras : []), [rawCameras]);
+
+  const [selectedCameraId, setSelectedCameraId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search).get('cameraId');
+      if (p) return p;
+    }
+    return BROADCASTER_ID;
+  });
+
+  const selectedCamera = useMemo(() => {
+    return cameras.find((c) => String(c.id) === String(selectedCameraId)) || { id: selectedCameraId, name: cameraLabel(selectedCameraId) };
+  }, [cameras, selectedCameraId]);
 
   const [cameraStatus, setCameraStatus] = useState(CAMERA_STATUS.CONNECTING);
   const live = cameraStatus === CAMERA_STATUS.LIVE;
@@ -60,7 +75,7 @@ const ActivityZones = ({ user, onNavigate }) => {
     setSaveError('');
     try {
       await sendJson(`${API_BASE}/api/zones`, 'POST', {
-        user_id: userId, camera_id: BROADCASTER_ID, name: name.trim(), coordinates: points,
+        user_id: userId, camera_id: selectedCameraId || BROADCASTER_ID, name: name.trim(), coordinates: points,
       });
       addToast('Zone saved.', 'success');
       stopDrawing();
@@ -122,10 +137,39 @@ const ActivityZones = ({ user, onNavigate }) => {
         </div>
       )}
 
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface p-3.5 shadow-sm">
+        <div className="flex items-center gap-2.5">
+          <Camera className="size-4 text-accent" aria-hidden="true" />
+          <label htmlFor="zone-camera-select" className="text-small font-medium text-fg">Active camera:</label>
+          <select
+            id="zone-camera-select"
+            className="select select-sm min-w-[200px]"
+            value={selectedCameraId}
+            onChange={(e) => setSelectedCameraId(e.target.value)}
+            disabled={drawing}
+          >
+            {cameras.length === 0 ? (
+              <option value={BROADCASTER_ID}>{BROADCASTER_LABEL}</option>
+            ) : (
+              cameras.map((cam) => (
+                <option key={cam.id} value={cam.id}>
+                  {cam.name ? `Camera: ${cam.name}` : cameraLabel(cam.id)}
+                </option>
+              ))
+            )}
+          </select>
+        </div>
+        <p className="text-xs text-fg-muted">
+          Drawing and previewing for <strong className="text-fg">{selectedCamera?.name || cameraLabel(selectedCameraId)}</strong>
+        </p>
+      </div>
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
         <div className="min-w-0 space-y-4">
           <ZoneStage
             zones={zones || []}
+            cameraId={selectedCameraId}
+            cameraName={selectedCamera?.name}
             drawing={drawing}
             points={points}
             onAddPoint={addPoint}
@@ -224,7 +268,7 @@ const ActivityZones = ({ user, onNavigate }) => {
                     <li key={zone.id} className="flex items-center justify-between gap-3 rounded-control border border-border bg-surface-sunken p-3">
                       <div className="min-w-0">
                         <h3 className="break-words text-small font-semibold text-fg [overflow-wrap:anywhere]">{zone.name}</h3>
-                        <p className="meta-text mt-0.5">{cameraLabel(zone.camera_id)}</p>
+                        <p className="meta-text mt-0.5">{cameras.find((c) => String(c.id) === String(zone.camera_id))?.name || cameraLabel(zone.camera_id)}</p>
                         <p className="meta-text">
                           {pts ? `${pts.length} corners` : 'Shape unreadable'}{created ? ` · ${created}` : ''}
                         </p>
