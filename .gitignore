@@ -31,3 +31,13 @@ myCam-release-candidate/
 *.njsproj
 *.sln
 *.sw?
+
+# test output
+test-artifacts/
+playwright-report/
+test-results/
+coverage/
+
+# temp files and drop archives
+files/
+*.zip

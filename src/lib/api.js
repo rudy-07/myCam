@@ -12,7 +12,8 @@ export const getAuthToken = () => {
     const stored = JSON.parse(localStorage.getItem('mycam_user') || 'null');
     return typeof stored?.token === 'string' ? stored.token.trim() : '';
   } catch {
-    return localStorage.getItem('mycam_token') || '';
+    // mycam_user was unreadable; apply the same trimming rules to the direct token.
+    try { return (localStorage.getItem('mycam_token') || '').trim(); } catch { return ''; }
   }
 };
 

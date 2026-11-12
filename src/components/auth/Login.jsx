@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Shield, Lock, Radio, Activity, CheckCircle2, Eye, EyeOff, ArrowRight, ArrowLeft, Sun, Moon } from 'lucide-react';
 import { API_BASE } from '../../config';
+import { postAuthJson } from '../../lib/authRequest';
 import logoIcon from '../../assets/mycam_no_text.png';
 
 const Login = ({
@@ -22,7 +23,7 @@ const Login = ({
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
     document.documentElement.setAttribute('data-theme', next);
-    try { localStorage.setItem('mycam_theme', next); } catch (e) { /* ignore */ }
+    try { localStorage.setItem('mycam_theme', next); } catch { /* ignore */ }
   };
 
   const handleSubmit = async (e) => {
@@ -36,21 +37,11 @@ const Login = ({
     setErrorMessage('');
 
     try {
-      const response = await fetch(`${API_BASE}/api/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          username: username.trim(),
-          password,
-        }),
-      });
+      const data = await postAuthJson(`${API_BASE}/api/login`, { username: username.trim(), password });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Invalid credentials.');
+      // A success response without a user (e.g. an HTML page or empty body) must never count as a login.
+      if (!data.user || typeof data.user !== 'object' || data.user.id === undefined || data.user.id === null) {
+        throw new Error('The server sent an unexpected response. Please try again.');
       }
 
       // Store token if provided
@@ -214,7 +205,7 @@ const Login = ({
             <div className="form-group">
               <label className="form-label" htmlFor="login-username">Username or Email</label>
               <div className="input-wrapper">
-                <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
                 </svg>
                 <input

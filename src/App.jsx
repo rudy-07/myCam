@@ -24,7 +24,9 @@ function readStoredUser() {
     const saved = localStorage.getItem('mycam_user');
     if (!saved) return null;
     const parsed = JSON.parse(saved);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    const hasId = parsed && (typeof parsed.id === 'number' || (typeof parsed.id === 'string' && parsed.id.trim() !== ''));
+    // A usable session always has a user id (the backend returns one); `{}` or other shapes are treated as signed out.
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) && hasId ? parsed : null;
   } catch {
     try { localStorage.removeItem('mycam_user'); } catch { /* ignore */ }
     return null;

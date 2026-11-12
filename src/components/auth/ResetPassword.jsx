@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Lock, ArrowRight, Eye, EyeOff, Shield, Sun, Moon } from 'lucide-react';
 import { API_BASE } from '../../config';
+import { generateStrongPassword as createSecurePassword, postAuthJson } from '../../lib/authRequest';
 import logoIcon from '../../assets/mycam_no_text.png';
 
 const calculateRequirements = (password, confirmPassword) => {
@@ -25,7 +26,9 @@ const calculateScore = (reqs) => {
 };
 
 const ResetPassword = ({ onBack, onLoginClick }) => {
-  const [token, setToken] = useState('');
+  // A token supplied by the reset link (?token=...) is read once; the manual field is only for links without one.
+  const [tokenFromLink] = useState(() => new URLSearchParams(window.location.search).get('token') || '');
+  const [token, setToken] = useState(tokenFromLink);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -38,24 +41,15 @@ const ResetPassword = ({ onBack, onLoginClick }) => {
   const reqs = calculateRequirements(password, confirmPassword);
   const score = calculateScore(reqs);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const urlToken = params.get('token');
-    if (urlToken) setToken(urlToken);
-  }, []);
-
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
     document.documentElement.setAttribute('data-theme', next);
-    try { localStorage.setItem('mycam_theme', next); } catch (e) { /* ignore */ }
+    try { localStorage.setItem('mycam_theme', next); } catch { /* ignore */ }
   };
 
   const generateStrongPassword = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+';
-    let pw = 'Aa1!';
-    for (let i = 4; i < 16; i++) pw += chars[Math.floor(Math.random() * chars.length)];
-    pw = pw.split('').sort(() => Math.random() - 0.5).join('');
+    const pw = createSecurePassword(16);
     setPassword(pw);
     setConfirmPassword(pw);
     setShowPassword(true);
@@ -81,16 +75,7 @@ const ResetPassword = ({ onBack, onLoginClick }) => {
     setErrorMessage('');
 
     try {
-      const res = await fetch(`${API_BASE}/api/reset-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: token.trim(), newPassword: password }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || 'Password reset failed.');
-      }
+      await postAuthJson(`${API_BASE}/api/reset-password`, { token: token.trim(), newPassword: password });
 
       setSubmitted(true);
     } catch (err) {
@@ -216,7 +201,7 @@ const ResetPassword = ({ onBack, onLoginClick }) => {
           {submitted ? (
             <div className="auth-success-screen visible" role="status" aria-live="polite">
               <div className="success-ring">
-                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </div>
@@ -256,7 +241,7 @@ const ResetPassword = ({ onBack, onLoginClick }) => {
 
               <form className="auth-form" onSubmit={handleSubmit} noValidate>
                 {/* Security Token (only if missing in URL) */}
-                {!token && (
+                {!tokenFromLink && (
                   <div className="form-group">
                     <label className="form-label" htmlFor="reset-token">Security Token</label>
                     <div className="input-wrapper">
@@ -298,7 +283,7 @@ const ResetPassword = ({ onBack, onLoginClick }) => {
                         aria-label="Generate strong password"
                         title="Generate strong password"
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true">
                           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                         </svg>
                       </button>

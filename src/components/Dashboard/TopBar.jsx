@@ -26,6 +26,7 @@ import useDismiss from '../../hooks/useDismiss';
 import { findNav } from './navConfig';
 import ClockDropdown from './ClockDropdown';
 import SearchPalette from './SearchPalette';
+import { formatRelativeTime } from '../../lib/relativeTime';
 
 const TopBar = ({
   user,
@@ -62,7 +63,6 @@ const TopBar = ({
   const profileRef = useRef(null);
   const profileBtnRef = useRef(null);
   const menuRef = useRef(null);
-  const mobileSearchInputRef = useRef(null);
 
   useDismiss(bellRef, showNotifications, useCallback(() => setShowNotifications(false), []), bellBtnRef);
   useDismiss(profileRef, showProfileMenu, useCallback(() => setShowProfileMenu(false), []), profileBtnRef);
@@ -87,18 +87,6 @@ const TopBar = ({
   const displayName = user?.name || user?.username || 'Operator';
   const avatarUrl = user?.profile_pic ? `${API_BASE}/uploads/pfps/${user.profile_pic}` : '';
   const avatarFailed = Boolean(avatarUrl) && failedAvatarUrl === avatarUrl;
-
-  const formatEventTime = (iso) => {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return '';
-    const diffMs = Date.now() - d.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return 'just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  };
 
   const filteredEvents = useMemo(() => {
     if (notificationFilter === 'unread') {
@@ -169,6 +157,7 @@ const TopBar = ({
             onClearAlerts={clearEvents}
             currentTheme={theme}
             onToggleTheme={toggleTheme}
+            userId={user?.id}
           />
         </div>
 
@@ -347,7 +336,7 @@ const TopBar = ({
                               {n.message}
                             </p>
                             <div className="mt-1 flex items-center gap-2 text-[10px] text-fg-muted">
-                              <span>{formatEventTime(n.timestamp)}</span>
+                              <span>{formatRelativeTime(n.timestamp)}</span>
                               {n.cameraId && (
                                 <>
                                   <span>•</span>
@@ -582,6 +571,7 @@ const TopBar = ({
               onClearAlerts={clearEvents}
               currentTheme={theme}
               onToggleTheme={toggleTheme}
+              userId={user?.id}
             />
             <button
               type="button"

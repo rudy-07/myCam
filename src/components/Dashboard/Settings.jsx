@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { BellRing, MonitorCheck, RadioTower } from 'lucide-react';
 import { useNotifications } from '../../context/NotificationContext';
+import { useToast } from '../../context/ToastContext';
 import { PageHeader } from '../ui';
 import StorageSettings from './StorageSettings';
 import ProfileSettings from './ProfileSettings';
@@ -9,6 +10,22 @@ const AlertPreferences = () => {
   const { preferences, preferencesLoaded, updatePreferences, triggerAlert } = useNotifications();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [testing, setTesting] = useState(false);
+  const { addToast } = useToast();
+  const sendTest = async () => {
+    setTesting(true);
+    try {
+      const created = await triggerAlert?.({
+        type: 'activity',
+        message: 'Security test alert: myCam alert notification system is operational!',
+        cameraId: 'system',
+      });
+      if (created) addToast('Test notification sent. It now appears in your notifications.', 'success');
+      else addToast('Could not send the test notification. Check your connection and try again.', 'error');
+    } finally {
+      setTesting(false);
+    }
+  };
   const change = async (key, checked) => {
     const next = { ...preferences, [key]: checked };
     setSaving(true); setError('');
@@ -46,16 +63,11 @@ const AlertPreferences = () => {
         <p className="text-xs text-fg-muted">Verify your in-app toasts and system alerts.</p>
         <button
           type="button"
-          onClick={() => {
-            triggerAlert?.({
-              type: 'activity',
-              message: 'Security test alert: myCam alert notification system is operational!',
-              cameraId: 'system'
-            });
-          }}
+          onClick={sendTest}
+          disabled={testing}
           className="btn btn-secondary btn-sm"
         >
-          Send Test Notification
+          {testing ? 'Sending…' : 'Send Test Notification'}
         </button>
       </div>
     </section>

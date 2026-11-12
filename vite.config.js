@@ -13,6 +13,8 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    // Output folders written by tests/coverage must not trigger dev-server page reloads.
+    watch: { ignored: ['**/test-artifacts/**', '**/playwright-report/**', '**/test-results/**', '**/coverage/**'] },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:3000',
@@ -56,7 +58,7 @@ export default defineConfig({
         manualChunks: {
           'vendor-react': ['react', 'react-dom'],
           'vendor-icons': ['lucide-react'],
-          'vendor-net': ['socket.io-client', 'simple-peer'],
+          'vendor-net': ['socket.io-client'],
         }
       }
     }

@@ -210,7 +210,7 @@ const ActivityZones = ({ user, onNavigate }) => {
               <div className="py-6 text-center">
                 <p className="text-small font-medium text-fg">No zones saved yet</p>
                 <p className="mx-auto mt-1 max-w-xs text-small text-fg-muted">
-                  Without a saved zone the camera viewer raises no motion alerts. Choose New zone to draw the first one.
+                  Until you save a zone, motion anywhere in the camera view raises an alert. Choose New zone to draw one and limit alerts to that area.
                 </p>
               </div>
             )}

@@ -26,6 +26,7 @@ import {
 import { API_BASE } from '../../config';
 import { authFetch } from '../../lib/api';
 import useDismiss from '../../hooks/useDismiss';
+import { buildCameraNameMap, describeCamera, describeRecording, describeSchedule, describeZone } from '../../lib/searchResults';
 
 const RECENT_KEY = 'mycam_recent_searches';
 const MAX_RECENT = 6;
@@ -108,6 +109,7 @@ const SearchPalette = ({
   onClearAlerts,
   currentTheme,
   onToggleTheme,
+  userId,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [filter, setFilter] = useState('all'); // 'all' | 'cameras' | 'recordings' | 'events' | 'schedules' | 'zones' | 'pages' | 'actions'
@@ -166,7 +168,10 @@ const SearchPalette = ({
         authFetch(`${API_BASE}/api/recordings`),
         authFetch(`${API_BASE}/api/alerts?limit=50`),
         authFetch(`${API_BASE}/api/schedules`),
-        authFetch(`${API_BASE}/api/zones`),
+        // GET /api/zones requires user_id (the backend answers 400 without it), so skip it when unknown.
+        userId === undefined || userId === null || userId === ''
+          ? Promise.resolve(null)
+          : authFetch(`${API_BASE}/api/zones?user_id=${encodeURIComponent(userId)}`),
       ]);
 
       if (camRes.status === 'fulfilled' && camRes.value.ok) {
@@ -189,7 +194,7 @@ const SearchPalette = ({
         if (Array.isArray(data)) setRemoteSchedules(data);
       }
 
-      if (zoneRes.status === 'fulfilled' && zoneRes.value.ok) {
+      if (zoneRes.status === 'fulfilled' && zoneRes.value?.ok) {
         const data = await zoneRes.value.json();
         if (Array.isArray(data)) setRemoteZones(data);
       }
@@ -198,7 +203,7 @@ const SearchPalette = ({
     } finally {
       setLoadingData(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (isOpen) {
@@ -224,6 +229,8 @@ const SearchPalette = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
+
+  const cameraNames = useMemo(() => buildCameraNameMap(remoteCameras), [remoteCameras]);
 
   // Build Comprehensive Search Results
   const results = useMemo(() => {
@@ -256,14 +263,15 @@ const SearchPalette = ({
       remoteCameras.forEach((cam) => {
         const name = cam.name || `Camera ${cam.id}`;
         const camIdStr = String(cam.id || '');
-        if (!q || name.toLowerCase().includes(q) || camIdStr.includes(q)) {
+        if (!q || name.toLowerCase().includes(q) || camIdStr.toLowerCase().includes(q)) {
+          const info = describeCamera(cam);
           list.push({
             type: 'camera',
             id: `cam-${cam.id}`,
-            title: name,
-            subtitle: `Camera ID #${cam.id} · Live WebRTC Feed`,
+            title: info.title,
+            subtitle: info.subtitle,
             icon: Camera,
-            badge: cam.isOnline ? 'Online' : 'Offline',
+            badge: info.badge,
             action: () => {
               onNavigate?.('cameras');
               onSelectCamera?.(cam);
@@ -278,16 +286,16 @@ const SearchPalette = ({
     // 3. Recordings
     if (filter === 'all' || filter === 'recordings') {
       remoteRecordings.forEach((rec) => {
-        const title = rec.title || rec.filename || `Recording ${rec.id}`;
-        const camName = rec.cameraName || `Camera ${rec.cameraId || ''}`;
-        if (!q || title.toLowerCase().includes(q) || camName.toLowerCase().includes(q)) {
+        const info = describeRecording(rec, cameraNames);
+        const title = info.title;
+        if (!q || title.toLowerCase().includes(q) || info.camera.toLowerCase().includes(q) || String(rec.camera_id ?? '').toLowerCase().includes(q)) {
           list.push({
             type: 'recording',
             id: `rec-${rec.id}`,
             title,
-            subtitle: `${camName} · ${rec.createdAt ? new Date(rec.createdAt).toLocaleDateString() : 'Archived Video'}`,
+            subtitle: info.subtitle,
             icon: Video,
-            badge: rec.duration ? `${rec.duration}s` : 'Recording',
+            badge: info.badge,
             action: () => {
               onNavigate?.('recordings');
               onSelectRecording?.(rec.id);
@@ -325,16 +333,16 @@ const SearchPalette = ({
     // 5. Schedules
     if (filter === 'all' || filter === 'schedules') {
       remoteSchedules.forEach((sch) => {
-        const name = sch.name || `Schedule ${sch.id}`;
-        const days = Array.isArray(sch.days) ? sch.days.join(', ') : 'Weekly';
-        if (!q || name.toLowerCase().includes(q) || days.toLowerCase().includes(q)) {
+        const info = describeSchedule(sch, cameraNames);
+        const name = info.title;
+        if (!q || name.toLowerCase().includes(q) || info.dayText.toLowerCase().includes(q) || info.camera.toLowerCase().includes(q)) {
           list.push({
             type: 'schedule',
             id: `sch-${sch.id}`,
             title: name,
-            subtitle: `Schedules · ${sch.startTime || '00:00'} - ${sch.endTime || '23:59'} (${days})`,
+            subtitle: info.subtitle,
             icon: Clock,
-            badge: sch.enabled !== false ? 'Active' : 'Disabled',
+            badge: info.badge,
             action: () => {
               onNavigate?.('schedules');
               saveRecent(name);
@@ -348,15 +356,16 @@ const SearchPalette = ({
     // 6. Activity Zones
     if (filter === 'all' || filter === 'zones') {
       remoteZones.forEach((zn) => {
-        const name = zn.name || `Zone ${zn.id}`;
-        if (!q || name.toLowerCase().includes(q)) {
+        const info = describeZone(zn, cameraNames);
+        const name = info.title;
+        if (!q || name.toLowerCase().includes(q) || info.camera.toLowerCase().includes(q)) {
           list.push({
             type: 'zone',
             id: `zn-${zn.id}`,
             title: name,
-            subtitle: `Activity Zone · Sensitivity ${zn.sensitivity || 'Default'}%`,
+            subtitle: info.subtitle,
             icon: Activity,
-            badge: 'Zone',
+            badge: info.badge,
             action: () => {
               onNavigate?.('activity');
               saveRecent(name);
@@ -490,7 +499,7 @@ const SearchPalette = ({
     }
 
     return list;
-  }, [searchQuery, filter, remoteCameras, remoteRecordings, remoteEvents, remoteSchedules, remoteZones, currentTheme, onNavigate, onSelectCamera, onSelectRecording, onToggleTheme, onClearAlerts, saveRecent]);
+  }, [searchQuery, filter, remoteCameras, remoteRecordings, remoteEvents, remoteSchedules, remoteZones, cameraNames, currentTheme, onNavigate, onSelectCamera, onSelectRecording, onToggleTheme, onClearAlerts, saveRecent]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -553,6 +562,7 @@ const SearchPalette = ({
       {isOpen && (
         <div
           role="dialog"
+          aria-busy={loadingData}
           aria-label="Search results and quick navigation"
           className="popover absolute left-0 right-0 top-full z-50 mt-2 max-h-[500px] w-full min-w-[340px] md:min-w-[480px] animate-fade-up overflow-hidden rounded-2xl border border-border-strong/70 bg-surface/95 shadow-2xl backdrop-blur-2xl"
         >

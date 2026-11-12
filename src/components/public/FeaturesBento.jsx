@@ -56,7 +56,7 @@ const FeaturesBento = () => {
 
   const handleSvgPointerUp = (e) => {
     if (e && e.target && e.target.releasePointerCapture && e.pointerId !== undefined) {
-      try { e.target.releasePointerCapture(e.pointerId); } catch (_) {}
+      try { e.target.releasePointerCapture(e.pointerId); } catch { /* some pointers cannot be captured; dragging still works without it */ }
     }
     setDraggingPoint(null);
   };
@@ -204,7 +204,7 @@ const FeaturesBento = () => {
                         onPointerDown={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+                          try { e.target.setPointerCapture(e.pointerId); } catch { /* some pointers cannot be captured; dragging still works without it */ }
                           setDraggingPoint({ zone: 'A', index: i });
                         }}
                         onPointerUp={handleSvgPointerUp}
@@ -241,7 +241,7 @@ const FeaturesBento = () => {
                         onPointerDown={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+                          try { e.target.setPointerCapture(e.pointerId); } catch { /* some pointers cannot be captured; dragging still works without it */ }
                           setDraggingPoint({ zone: 'B', index: i });
                         }}
                         onPointerUp={handleSvgPointerUp}

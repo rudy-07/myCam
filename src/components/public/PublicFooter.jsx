@@ -2,7 +2,7 @@ import React from 'react';
 import { Github, Globe, Mail } from 'lucide-react';
 import logoIcon from '../../assets/mycam_no_text.png';
 
-const PublicFooter = ({ onNavigate, onLoginClick, onRegisterClick }) => {
+const PublicFooter = ({ onNavigate }) => {
   const handleNav = (target, isHash = false) => {
     if (isHash) {
       onNavigate('landing');

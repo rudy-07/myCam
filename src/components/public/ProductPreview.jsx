@@ -168,7 +168,7 @@ const ProductPreview = () => {
 
   const handleCalPointerUp = (e) => {
     if (e && e.target && e.target.releasePointerCapture && e.pointerId !== undefined) {
-      try { e.target.releasePointerCapture(e.pointerId); } catch (_) {}
+      try { e.target.releasePointerCapture(e.pointerId); } catch { /* some pointers cannot be captured; dragging still works without it */ }
     }
     setDraggingNode(null);
   };
@@ -225,7 +225,8 @@ const ProductPreview = () => {
               { id: 'grid', label: 'Surveillance Grid', icon: LayoutGrid },
               { id: 'zones', label: 'Polygon Zone Calibration', icon: Activity },
               { id: 'recordings', label: 'Recording Library', icon: Film },
-            ].map(({ id, label, icon: TabIcon }) => {
+            ].map(({ id, label, icon }) => {
+              const TabIcon = icon;
               const isActive = activeTab === id;
               return (
                 <button
@@ -657,7 +658,7 @@ const ProductPreview = () => {
                           onPointerDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+                            try { e.target.setPointerCapture(e.pointerId); } catch { /* some pointers cannot be captured; dragging still works without it */ }
                             setDraggingNode({ zone: 1, index: i });
                           }}
                           onPointerUp={handleCalPointerUp}
@@ -693,7 +694,7 @@ const ProductPreview = () => {
                           onPointerDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
+                            try { e.target.setPointerCapture(e.pointerId); } catch { /* some pointers cannot be captured; dragging still works without it */ }
                             setDraggingNode({ zone: 2, index: i });
                           }}
                           onPointerUp={handleCalPointerUp}

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Mail, ArrowRight, Shield, Lock, Sun, Moon } from 'lucide-react';
 import { API_BASE } from '../../config';
+import { postAuthJson } from '../../lib/authRequest';
 import logoIcon from '../../assets/mycam_no_text.png';
 
 const ForgotPassword = ({ onBack, onLoginClick }) => {
@@ -14,7 +15,7 @@ const ForgotPassword = ({ onBack, onLoginClick }) => {
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
     document.documentElement.setAttribute('data-theme', next);
-    try { localStorage.setItem('mycam_theme', next); } catch (e) { /* ignore */ }
+    try { localStorage.setItem('mycam_theme', next); } catch { /* ignore */ }
   };
 
   const handleSubmit = async (e) => {
@@ -28,16 +29,7 @@ const ForgotPassword = ({ onBack, onLoginClick }) => {
     setErrorMessage('');
 
     try {
-      const res = await fetch(`${API_BASE}/api/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || 'Could not send reset link.');
-      }
+      await postAuthJson(`${API_BASE}/api/forgot-password`, { email: email.trim() });
 
       setSubmitted(true);
     } catch (err) {
@@ -163,7 +155,7 @@ const ForgotPassword = ({ onBack, onLoginClick }) => {
           {submitted ? (
             <div className="auth-success-screen visible" role="status" aria-live="polite">
               <div className="success-ring">
-                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </div>

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Copy, Maximize2, Plus, Radio, SearchX, Trash2, VideoOff, AlertTriangle, ShieldAlert } from 'lucide-react';
+import { Copy, Maximize2, Plus, Radio, SearchX, Trash2, VideoOff, AlertTriangle, ShieldAlert, RefreshCw } from 'lucide-react';
 import CameraFeed from './CameraFeed';
 import CameraModal from './CameraModal';
 import { Button, PageHeader, StatusBadge, EmptyState, Modal } from '../ui';
@@ -25,15 +25,18 @@ const CameraGrid = ({ user, searchQuery, onNavigate, onClearSearch }) => {
   const [cameraToDelete, setCameraToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [statuses, setStatuses] = useState({});
+  const [loadError, setLoadError] = useState('');
 
   const loadCameras = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const res = await authFetch(`${API_BASE}/api/cameras`);
       if (!res.ok) throw new Error(await readErrorMessage(res));
       const data = await res.json();
       setCameras(Array.isArray(data) ? data : []);
     } catch (error) {
+      setLoadError(error.message || 'Could not load cameras.');
       addToast(error.message || 'Could not load cameras.', 'error');
     } finally {
       setLoading(false);
@@ -188,6 +191,14 @@ const CameraGrid = ({ user, searchQuery, onNavigate, onClearSearch }) => {
             Loading registered cameras…
           </div>
         </div>
+      ) : loadError && cameras.length === 0 ? (
+        <EmptyState
+          tone="error"
+          icon={SearchX}
+          title="Cameras could not be loaded"
+          description={`Your camera list could not be retrieved, so it is not shown as empty. ${loadError}`}
+          action={<Button icon={RefreshCw} onClick={loadCameras}>Try again</Button>}
+        />
       ) : filteredCameras.length === 0 ? (
         <EmptyState
           icon={SearchX}

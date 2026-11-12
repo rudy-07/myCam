@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Shield, Lock, User, Mail, Radio, ArrowRight, Eye, EyeOff, CheckCircle2, Sun, Moon } from 'lucide-react';
 import { API_BASE } from '../../config';
+import { generateStrongPassword as createSecurePassword, postAuthJson, validateRegistration } from '../../lib/authRequest';
 import logoIcon from '../../assets/mycam_no_text.png';
 
 const calculateRequirements = (password, confirmPassword) => {
@@ -54,14 +55,11 @@ const Register = ({
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
     document.documentElement.setAttribute('data-theme', next);
-    try { localStorage.setItem('mycam_theme', next); } catch (e) { /* ignore */ }
+    try { localStorage.setItem('mycam_theme', next); } catch { /* ignore */ }
   };
 
   const generateStrongPassword = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+';
-    let pw = 'Aa1!';
-    for (let i = 4; i < 16; i++) pw += chars[Math.floor(Math.random() * chars.length)];
-    pw = pw.split('').sort(() => Math.random() - 0.5).join('');
+    const pw = createSecurePassword(16);
     setPassword(pw);
     setConfirmPassword(pw);
     setShowPassword(true);
@@ -80,8 +78,9 @@ const Register = ({
       return;
     }
 
-    if (password.length < 8) {
-      setErrorMessage('Password must be at least 8 characters.');
+    const validationError = validateRegistration({ name: name.trim(), username: username.trim(), email: email.trim(), password });
+    if (validationError) {
+      setErrorMessage(validationError);
       return;
     }
 
@@ -94,24 +93,12 @@ const Register = ({
     setErrorMessage('');
 
     try {
-      const response = await fetch(`${API_BASE}/api/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: name.trim(),
-          username: username.trim(),
-          email: email.trim(),
-          password,
-        }),
+      await postAuthJson(`${API_BASE}/api/register`, {
+        name: name.trim(),
+        username: username.trim(),
+        email: email.trim(),
+        password,
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Registration failed.');
-      }
 
       onRegisterSuccess();
     } catch (err) {
@@ -327,7 +314,7 @@ const Register = ({
                     aria-label="Generate strong password"
                     title="Generate strong password"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24" aria-hidden="true">
                       <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                     </svg>
                   </button>

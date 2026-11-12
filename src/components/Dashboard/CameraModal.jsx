@@ -20,7 +20,8 @@ import { Button, StatusBadge } from '../ui';
 import { useToast } from '../../context/ToastContext';
 import { useCameraStatus } from '../../context/CameraStatusContext';
 import { CAMERA_STATUS } from '../../lib/cameraStatus';
-import { analyzeFrameMotion, resetMotionState, isBoxIntersectingZone } from '../../utils/aiDetector';
+import { analyzeFrameMotion, resetMotionState } from '../../utils/aiDetector';
+import { evaluateMotion, motionAlertMessage } from '../../lib/motionAlerts';
 import io from 'socket.io-client';
 import { API_BASE, SOCKET_URL } from '../../config';
 import { authFetch, authUpload, getAuthToken } from '../../lib/api';
@@ -249,7 +250,7 @@ const CameraModal = ({ user, camera, onClose, onNavigate, children }) => {
         const bw = region.box.width * canvas.width;
         const bh = region.box.height * canvas.height;
 
-        const inZone = cameraZones.some(z => isBoxIntersectingZone(region.box, z.coordinates_json));
+        const { hasZones, inZone, shouldAlert } = evaluateMotion(region.box, cameraZones);
         const boxColor = inZone ? '#ef4444' : '#22c55e';
 
         ctx.strokeStyle = boxColor;
@@ -261,14 +262,14 @@ const CameraModal = ({ user, camera, onClose, onNavigate, children }) => {
         ctx.font = 'bold 12px monospace';
         ctx.fillText(inZone ? 'MOTION IN ZONE' : 'MOTION', bx + 6, Math.max(16, by - 7));
 
-        if ((cameraZones.length === 0 || inZone) && (Date.now() - lastMotionAlertRef.current > 5000)) {
+        if (shouldAlert && (Date.now() - lastMotionAlertRef.current > 5000)) {
           lastMotionAlertRef.current = Date.now();
           takeSnapshot('motion');
           socketRef.current?.emit('trigger-alert', {
             type: 'motion',
             cameraId: camera.id,
             timestamp: new Date().toISOString(),
-            message: `Motion detected inside an activity zone on ${camera.name || camera.id}`
+            message: motionAlertMessage(camera.name || camera.id, hasZones)
           });
 
           if (autoRecordOnMotion && !recordingActiveRef.current && Date.now() - lastAutoRecordAtRef.current >= 30000) {

@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Film, Loader2, AlertTriangle, FileX, Download, Share2, RotateCcw, ShieldCheck } from 'lucide-react';
 import { Modal, Button, StatusBadge } from '../ui';
+import useAuthedObjectUrl from '../../hooks/useAuthedObjectUrl';
 import { MEDIA_STATE, formatDateTime, formatDuration, formatFileSize } from '../../lib/recordingMedia';
 
 const describeMediaError = (error) => {
@@ -48,9 +49,13 @@ const VideoPlayerModal = ({
   const [errorText, setErrorText] = useState('');
   const [attempt, setAttempt] = useState(0);
 
+  const canPlay = Boolean(url) && mediaState === MEDIA_STATE.AVAILABLE;
+  // The backend needs the Authorization header, which <video src> cannot send: play a blob fetched with the session token.
+  const media = useAuthedObjectUrl(url, canPlay && Boolean(recording), attempt);
+
   if (!recording) return null;
 
-  const canPlay = Boolean(url) && mediaState === MEDIA_STATE.AVAILABLE;
+  const shownError = errorText || media.error;
   const date = formatDateTime(recording.created_at);
   const duration = formatDuration(recording.duration);
   const size = formatFileSize(recording.file_size_bytes);
@@ -97,11 +102,11 @@ const VideoPlayerModal = ({
     >
       {/* Fixed 16:9 well: no layout shift when media loads; portrait video is letterboxed, never cropped */}
       <div className="relative flex aspect-video max-h-[62dvh] w-full items-center justify-center overflow-hidden bg-surface-sunken">
-        {canPlay && !errorText && (
+        {canPlay && !shownError && media.objectUrl && (
           <video
             key={attempt}
             ref={videoRef}
-            src={url}
+            src={media.objectUrl}
             controls
             playsInline
             preload="metadata"
@@ -111,17 +116,17 @@ const VideoPlayerModal = ({
             className="size-full object-contain"
           />
         )}
-        {canPlay && !errorText && !loaded && (
+        {canPlay && !shownError && (!media.objectUrl || !loaded) && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-surface-sunken/70">
             <Notice icon={Loader2} spin title="Loading recording">Waiting for the server to send the video.</Notice>
           </div>
         )}
-        {canPlay && errorText && (
+        {canPlay && shownError && (
           <Notice
             icon={AlertTriangle} tone="danger" role="alert" title="Playback failed"
             action={<Button size="sm" icon={RotateCcw} onClick={retry}>Try again</Button>}
           >
-            {errorText}
+            {shownError}
           </Notice>
         )}
         {!canPlay && mediaState === MEDIA_STATE.CHECKING && (

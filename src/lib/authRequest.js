@@ -14,10 +14,11 @@ export async function postAuthJson(path, payload) {
   let data = null;
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
-    try { data = await response.json(); } catch { /* handled below */ }
-  } else {
+    try { data = await response.json(); } catch { /* invalid JSON: treated as "no usable body" below */ }
+  } else if (contentType.includes('text/plain')) {
+    // Only plain text is safe to show. HTML (proxy/gateway error pages, SPA fallbacks) is never surfaced.
     try {
-      const text = await response.text();
+      const text = (await response.text()).trim();
       if (text) data = { message: text.slice(0, 240) };
     } catch { /* empty response */ }
   }
@@ -61,4 +62,31 @@ export function generateStrongPassword(length = 16) {
     [chars[i], chars[j]] = [chars[j], chars[i]];
   }
   return chars.join('');
+}
+
+export const PASSWORD_MAX_LENGTH = 128;
+const USERNAME_PATTERN = /^[A-Za-z0-9_.-]{3,40}$/;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Returns '' when the password satisfies the backend policy (server/auth.cjs), otherwise the first problem. */
+export function validatePasswordPolicy(password) {
+  const value = typeof password === 'string' ? password : '';
+  if (value.length < 8) return 'Password must be at least 8 characters.';
+  if (value.length > PASSWORD_MAX_LENGTH) return `Password must be ${PASSWORD_MAX_LENGTH} characters or fewer.`;
+  if (!/[A-Z]/.test(value)) return 'Password must include an uppercase letter.';
+  if (!/[a-z]/.test(value)) return 'Password must include a lowercase letter.';
+  if (!/[0-9]/.test(value)) return 'Password must include a number.';
+  if (!/[^A-Za-z0-9]/.test(value)) return 'Password must include a special character.';
+  return '';
+}
+
+/** Mirrors the backend registration rules so obvious mistakes are caught before a request is sent. */
+export function validateRegistration({ name, username, email, password }) {
+  if (typeof name !== 'string' || !name.trim()) return 'Enter your full name.';
+  if (name.length > 100) return 'Name must be 100 characters or fewer.';
+  if (typeof username !== 'string' || !USERNAME_PATTERN.test(username)) {
+    return 'Username must be 3-40 characters: letters, numbers, dots, dashes or underscores.';
+  }
+  if (typeof email !== 'string' || email.length > 254 || !EMAIL_PATTERN.test(email)) return 'Enter a valid email address.';
+  return validatePasswordPolicy(password);
 }
