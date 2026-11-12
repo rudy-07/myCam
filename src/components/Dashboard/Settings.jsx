@@ -1,176 +1,90 @@
-import React, { useState, useEffect } from 'react';
-import { User, Mail, Lock, Bell, Moon, Shield, Save, Check } from 'lucide-react';
+import React, { useState } from 'react';
+import { BellRing, MonitorCheck, RadioTower } from 'lucide-react';
+import { useNotifications } from '../../context/NotificationContext';
+import { useToast } from '../../context/ToastContext';
+import { PageHeader } from '../ui';
+import StorageSettings from './StorageSettings';
+import ProfileSettings from './ProfileSettings';
 
-const Settings = ({ user }) => {
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    currentPassword: '',
-    newPassword: ''
-  });
-  const [isEditing, setIsEditing] = useState(false);
-  const [message, setMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-     if (user) {
-         setFormData(prev => ({
-             ...prev,
-             name: user.name || '',
-             email: user.email || '' // Assuming we had email in user object, if not need to fetch
-         }));
-     }
-  }, [user]);
-
-  const handleChange = (e) => {
-      setFormData({ ...formData, [e.target.name]: e.target.value });
+const AlertPreferences = () => {
+  const { preferences, preferencesLoaded, updatePreferences, triggerAlert } = useNotifications();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [testing, setTesting] = useState(false);
+  const { addToast } = useToast();
+  const sendTest = async () => {
+    setTesting(true);
+    try {
+      const created = await triggerAlert?.({
+        type: 'activity',
+        message: 'Security test alert: myCam alert notification system is operational!',
+        cameraId: 'system',
+      });
+      if (created) addToast('Test notification sent. It now appears in your notifications.', 'success');
+      else addToast('Could not send the test notification. Check your connection and try again.', 'error');
+    } finally {
+      setTesting(false);
+    }
   };
-
-  const handleSubmit = async (e) => {
-      e.preventDefault();
-      setIsLoading(true);
-      setMessage('');
-
-      try {
-          const res = await fetch('http://localhost:3000/api/user/profile', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                  id: user.id,
-                  name: formData.name,
-                  email: formData.email,
-                   // Password logic to be added
-              })
-          });
-          
-           if (res.ok) {
-              const data = await res.json();
-              setMessage('Profile updated successfully!');
-              setIsEditing(false);
-              // In real app, update global user context here
-          } else {
-              setMessage('Failed to update profile.');
-          }
-      } catch (err) {
-          setMessage('Connection error.');
-      } finally {
-          setIsLoading(false);
+  const change = async (key, checked) => {
+    const next = { ...preferences, [key]: checked };
+    setSaving(true); setError('');
+    try {
+      if (key === 'browserNotifications' && checked && 'Notification' in window && Notification.permission !== 'granted') {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') throw new Error('Browser notifications were not permitted.');
       }
+      await updatePreferences(next);
+    } catch (err) { setError(err.message || 'Could not save preferences.'); }
+    finally { setSaving(false); }
   };
-
+  const options = [
+    { key: 'motionAlerts', title: 'Motion alerts', description: 'Store and notify about motion events from camera broadcasters.', icon: RadioTower },
+    { key: 'dashboardToasts', title: 'Dashboard toast messages', description: 'Show a short in-app message when an alert arrives.', icon: BellRing },
+    { key: 'browserNotifications', title: 'Browser notifications', description: 'Show system notifications while myCam is open and permission is granted.', icon: MonitorCheck },
+  ];
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <h2 className="text-3xl font-bold text-white mb-8">Settings</h2>
-
-      {/* Profile Section */}
-      <div className="bg-slate-800 rounded-2xl p-6 border border-slate-700 mb-6">
-          <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                  <User className="text-primary-DEFAULT" /> Profile Information
-              </h3>
-              <button 
-                onClick={() => setIsEditing(!isEditing)}
-                className="text-primary-DEFAULT hover:text-white transition-colors text-sm font-medium"
-              >
-                  {isEditing ? 'Cancel' : 'Edit Profile'}
-              </button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                      <label className="text-xs text-slate-400 font-bold uppercase tracking-wider">Full Name</label>
-                      <input 
-                        type="text" 
-                        name="name"
-                        value={formData.name}
-                        onChange={handleChange}
-                        disabled={!isEditing}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-primary-DEFAULT outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                      />
-                  </div>
-                   <div className="space-y-1">
-                      <label className="text-xs text-slate-400 font-bold uppercase tracking-wider">Email Address</label>
-                      <input 
-                        type="email" 
-                        name="email"
-                         value={formData.email}
-                        onChange={handleChange}
-                        disabled={!isEditing}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-primary-DEFAULT outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                      />
-                  </div>
-              </div>
-
-               {isEditing && (
-                  <div className="flex justify-end pt-2">
-                      <button 
-                        type="submit" 
-                        disabled={isLoading}
-                        className="bg-primary-DEFAULT hover:bg-primary-hover text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 transition-colors disabled:opacity-50"
-                      >
-                         {isLoading ? 'Saving...' : <><Save size={18} /> Save Changes</>}
-                      </button>
-                  </div>
-              )}
-               {message && <p className={`text-sm ${message.includes('success') ? 'text-green-400' : 'text-red-400'} mt-2`}>{message}</p>}
-          </form>
+    <section className="surface-card space-y-4 p-5" aria-labelledby="alert-preferences-title">
+      <div><h2 id="alert-preferences-title" className="text-base font-semibold text-fg">Alerts &amp; notifications</h2><p className="mt-1 text-small text-fg-muted">Choose which alert channels myCam uses. Email and SMS delivery are not configured.</p></div>
+      {!preferencesLoaded && <p className="text-small text-fg-muted">Loading saved preferences…</p>}
+      <div className="divide-y divide-border">
+        {options.map(({ key, title, description, icon: Icon }) => (
+          <label key={key} className="flex cursor-pointer items-start gap-3 py-4">
+            <span className="mt-0.5 rounded-control bg-surface-sunken p-2 text-accent">{React.createElement(Icon, { className: 'size-4', 'aria-hidden': true })}</span>
+            <span className="min-w-0 flex-1"><span className="block text-small font-semibold text-fg">{title}</span><span className="mt-1 block text-small text-fg-muted">{description}</span></span>
+            <input type="checkbox" className="mt-1 size-4 accent-[var(--color-accent)]" checked={Boolean(preferences[key])} disabled={saving || !preferencesLoaded} onChange={(e) => change(key, e.target.checked)} aria-label={title} />
+          </label>
+        ))}
       </div>
+      {saving && <p className="text-small text-fg-muted" role="status">Saving preferences…</p>}
+      {error && <p className="text-small text-danger" role="alert">{error}</p>}
 
-       {/* Appearance & Notifications (Visual Only for now) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-           <div className="bg-slate-800 rounded-2xl p-6 border border-slate-700">
-               <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-4">
-                  <Bell className="text-yellow-500" /> Notifications
-              </h3>
-               <div className="space-y-4">
-                   <div 
-                        className="flex items-center justify-between cursor-pointer group"
-                        onClick={() => document.getElementById('toggle-motion').click()}
-                   >
-                       <span className="text-slate-300 group-hover:text-white">Motion Alerts</span>
-                       <div 
-                            id="toggle-motion"
-                            className="w-12 h-6 bg-primary-DEFAULT rounded-full relative transition-colors"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                e.currentTarget.classList.toggle('bg-slate-700');
-                                e.currentTarget.classList.toggle('bg-primary-DEFAULT');
-                                e.currentTarget.children[0].classList.toggle('right-1');
-                                e.currentTarget.children[0].classList.toggle('left-1');
-                            }}
-                       >
-                           <div className="w-4 h-4 bg-white rounded-full absolute top-1 right-1 shadow-sm transition-all"></div>
-                       </div>
-                   </div>
-                    <div className="flex items-center justify-between">
-                       <span className="text-slate-300">Email Updates</span>
-                       <div className="w-12 h-6 bg-slate-700 rounded-full relative cursor-pointer"><div className="w-4 h-4 bg-white rounded-full absolute top-1 left-1 shadow-sm"></div></div>
-                   </div>
-               </div>
-            </div>
-
-            <div className="bg-slate-800 rounded-2xl p-6 border border-slate-700">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-4">
-                   <Shield className="text-green-500" /> Security
-               </h3>
-               <div className="space-y-3">
-                    <button 
-                        onClick={() => alert("Password change flow would open here (Requires Auth implementation updates).")}
-                        className="w-full flex items-center justify-between p-3 bg-slate-900 rounded-lg border border-slate-700 hover:border-slate-500 transition-colors text-left group"
-                    >
-                        <span className="text-slate-300 group-hover:text-white">Change Password</span>
-                        <Lock size={16} className="text-slate-500" />
-                    </button>
-                    <button className="w-full flex items-center justify-between p-3 bg-slate-900 rounded-lg border border-slate-700 hover:border-slate-500 transition-colors text-left group">
-                       <span className="text-slate-300 group-hover:text-white">Active Sessions</span>
-                       <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded">2 Active</span>
-                   </button>
-              </div>
-           </div>
+      <div className="pt-2 border-t border-border flex items-center justify-between">
+        <p className="text-xs text-fg-muted">Verify your in-app toasts and system alerts.</p>
+        <button
+          type="button"
+          onClick={sendTest}
+          disabled={testing}
+          className="btn btn-secondary btn-sm"
+        >
+          {testing ? 'Sending…' : 'Send Test Notification'}
+        </button>
       </div>
-    </div>
+    </section>
   );
 };
+
+const Settings = ({ user, onUserUpdate }) => (
+  <div className="mx-auto max-w-5xl space-y-6">
+    <PageHeader
+      eyebrow="Preferences"
+      title="Settings"
+      description="Choose how recording storage quotas are counted and keep your profile details up to date."
+    />
+    <AlertPreferences />
+    <StorageSettings user={user} />
+    <ProfileSettings user={user} onUserUpdate={onUserUpdate} />
+  </div>
+);
 
 export default Settings;

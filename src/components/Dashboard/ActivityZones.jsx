@@ -1,282 +1,300 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Plus, Trash2, Save, Undo, MousePointer2 } from 'lucide-react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
+import { Plus, Trash2, Save, Undo2, X, MapPinned, RefreshCw, AlertTriangle, Radio, Hexagon, Camera } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
+import { API_BASE } from '../../config';
+import { Button, Field, PageHeader, EmptyState, ConfirmDialog } from '../ui';
+import ZoneStage from './ZoneStage';
+import useApiResource, { requireArray } from '../../hooks/useApiResource';
+import { sendJson } from '../../lib/api';
+import { cameraLabel, BROADCASTER_ID, BROADCASTER_LABEL } from '../../lib/cameras';
+import { parseCoordinates, validateDraft, MIN_POINTS, MAX_NAME_LENGTH } from '../../lib/zones';
+import { formatDateTime } from '../../lib/recordingMedia';
+import { CAMERA_STATUS } from '../../lib/cameraStatus';
 
-const ActivityZones = ({ user }) => {
+const INSTRUCTIONS = 'Click or tap the camera picture to place each corner of the zone. With a keyboard, focus the picture, move the crosshair with the arrow keys (hold Shift for bigger steps), press Enter to place a corner and Backspace to remove the last one.';
+
+const ActivityZones = ({ user, onNavigate }) => {
   const { addToast } = useToast();
-  const [zones, setZones] = useState([]);
-  const [selectedCamera, setSelectedCamera] = useState('mobile'); // Default to mobile cam
-  const [isDrawing, setIsDrawing] = useState(false);
+  const userId = user?.id;
+  const zonesRes = useApiResource(userId ? `${API_BASE}/api/zones?user_id=${userId}` : null, requireArray);
+  const zones = zonesRes.data;
+  const camerasRes = useApiResource(userId ? `${API_BASE}/api/cameras` : null, requireArray);
+  const rawCameras = camerasRes.data;
+  const cameras = useMemo(() => (Array.isArray(rawCameras) ? rawCameras : []), [rawCameras]);
+
+  const [selectedCameraId, setSelectedCameraId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search).get('cameraId');
+      if (p) return p;
+    }
+    return BROADCASTER_ID;
+  });
+
+  const selectedCamera = useMemo(() => {
+    return cameras.find((c) => String(c.id) === String(selectedCameraId)) || { id: selectedCameraId, name: cameraLabel(selectedCameraId) };
+  }, [cameras, selectedCameraId]);
+
+  const [cameraStatus, setCameraStatus] = useState(CAMERA_STATUS.CONNECTING);
+  const live = cameraStatus === CAMERA_STATUS.LIVE;
+
+  const [drawing, setDrawing] = useState(false);
   const [points, setPoints] = useState([]);
-  const [zoneName, setZoneName] = useState('');
-  
-  const canvasRef = useRef(null);
-  const containerRef = useRef(null);
+  const [name, setName] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [announce, setAnnounce] = useState('');
+  const saveLock = useRef(false);
+  const nameRef = useRef(null);
+  const headingRef = useRef(null);
 
-  // Fetch Zones
-  const fetchZones = async () => {
-      if (!user) return;
-      try {
-          const res = await fetch(`http://localhost:3000/api/zones?user_id=${user.id}`);
-          if (!res.ok) {
-              console.warn('Failed to fetch zones, status:', res.status);
-              return; // Stop if failed
-          }
-          const data = await res.json();
-          if (Array.isArray(data)) {
-            setZones(data);
-          } else {
-             setZones([]); // Fallback
-          }
-      } catch (err) {
-          console.error("Failed to load zones", err);
-          setZones([]);
-      }
-  };
+  const [confirmZone, setConfirmZone] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const deleteLock = useRef(false);
 
-  useEffect(() => {
-      fetchZones();
-  }, [user]);
+  const errors = useMemo(() => validateDraft({ name, points }), [name, points]);
 
-  // Handle Drawing on Canvas
-  useEffect(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const startDrawing = () => { setDrawing(true); setPoints([]); setName(''); setSubmitted(false); setSaveError(''); setAnnounce('Drawing started. No corners placed yet.'); };
+  const stopDrawing = () => { setDrawing(false); setPoints([]); setName(''); setSubmitted(false); setSaveError(''); setAnnounce(''); };
 
-      // Draw existing zones for this camera
-      zones.filter(z => z.camera_id === selectedCamera).forEach(zone => {
-          const coords = zone.coordinates_json;
-          if (coords.length > 0) {
-              ctx.beginPath();
-              ctx.moveTo(coords[0].x * canvas.width, coords[0].y * canvas.height);
-              for (let i = 1; i < coords.length; i++) {
-                  ctx.lineTo(coords[i].x * canvas.width, coords[i].y * canvas.height);
-              }
-              ctx.closePath();
-              ctx.fillStyle = 'rgba(34, 197, 94, 0.2)'; // Green transparent
-              ctx.fill();
-              ctx.strokeStyle = '#22c55e';
-              ctx.lineWidth = 2;
-              ctx.stroke();
-          }
+  const addPoint = useCallback((p) => {
+    setPoints((prev) => { const next = [...prev, p]; setAnnounce(`Corner ${next.length} placed.`); return next; });
+  }, []);
+  const undo = useCallback(() => {
+    setPoints((prev) => { if (!prev.length) return prev; setAnnounce(`Corner ${prev.length} removed. ${prev.length - 1} placed.`); return prev.slice(0, -1); });
+  }, []);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    if (saveLock.current) return;
+    setSubmitted(true);
+    if (Object.keys(errors).length) { if (errors.name) nameRef.current?.focus(); return; }
+    saveLock.current = true;
+    setSaving(true);
+    setSaveError('');
+    try {
+      await sendJson(`${API_BASE}/api/zones`, 'POST', {
+        user_id: userId, camera_id: selectedCameraId || BROADCASTER_ID, name: name.trim(), coordinates: points,
       });
-
-      // Draw current points
-      if (points.length > 0) {
-          ctx.beginPath();
-          ctx.moveTo(points[0].x * canvas.width, points[0].y * canvas.height);
-          for (let i = 1; i < points.length; i++) {
-              ctx.lineTo(points[i].x * canvas.width, points[i].y * canvas.height);
-          }
-          if (isDrawing) {
-             // Close loop visual if enough points? or just open line
-             ctx.strokeStyle = '#3b82f6'; // Blue drawing
-             ctx.lineWidth = 2;
-             ctx.stroke();
-          } else {
-             ctx.closePath();
-             ctx.fillStyle = 'rgba(59, 130, 246, 0.3)';
-             ctx.fill();
-             ctx.strokeStyle = '#3b82f6';
-             ctx.lineWidth = 2;
-             ctx.stroke();
-          }
-
-          // Draw Vertex Points
-          points.forEach(p => {
-              ctx.beginPath();
-              ctx.arc(p.x * canvas.width, p.y * canvas.height, 4, 0, Math.PI * 2);
-              ctx.fillStyle = '#fff';
-              ctx.fill();
-              ctx.strokeStyle = '#3b82f6';
-              ctx.stroke();
-          });
-      }
-
-  }, [points, zones, selectedCamera]);
-
-  const handleCanvasClick = (e) => {
-      if (!isDrawing) return;
-
-      const rect = canvasRef.current.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / rect.width;
-      const y = (e.clientY - rect.top) / rect.height;
-
-      setPoints([...points, { x, y }]);
+      addToast('Zone saved.', 'success');
+      stopDrawing();
+      zonesRes.reload();
+    } catch (err) {
+      setSaveError(err.message);
+      addToast(`The zone was not saved: ${err.message}`, 'error', 5000);
+    } finally {
+      saveLock.current = false;
+      setSaving(false);
+    }
   };
 
-  const handleSave = async () => {
-      if (!zoneName || points.length < 3) {
-          addToast("Name and at least 3 points required.", "error");
-          return;
-      }
-
-      try {
-          const res = await fetch('http://localhost:3000/api/zones', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                  user_id: user.id,
-                  camera_id: selectedCamera,
-                  name: zoneName,
-                  coordinates: points
-              })
-          });
-          
-          if (res.ok) {
-              setPoints([]);
-              setIsDrawing(false);
-              setZoneName('');
-              fetchZones();
-              addToast('Zone saved successfully', 'success');
-          }
-      } catch (err) {
-          addToast('Error saving zone', 'error');
-      }
-  };
-
-  const handleDelete = async (id) => {
-      if (confirm('Delete this zone?')) {
-          await fetch(`http://localhost:3000/api/zones/${id}`, { method: 'DELETE' });
-          fetchZones();
-      }
+  const openDelete = (zone) => { setDeleteError(''); setConfirmZone(zone); };
+  const handleDelete = async () => {
+    if (deleteLock.current || !confirmZone) return;
+    deleteLock.current = true;
+    setDeleting(true);
+    setDeleteError('');
+    const zone = confirmZone;
+    try {
+      await sendJson(`${API_BASE}/api/zones/${zone.id}`, 'DELETE');
+      addToast(`Zone “${zone.name}” deleted.`, 'success');
+      zonesRes.setData((list) => (list || []).filter((z) => z.id !== zone.id));
+      setConfirmZone(null);
+      zonesRes.reload();
+      setTimeout(() => headingRef.current?.focus(), 0);
+    } catch (err) {
+      setDeleteError(`The zone was not deleted: ${err.message}`);
+      addToast(`The zone was not deleted: ${err.message}`, 'error', 5000);
+    } finally {
+      deleteLock.current = false;
+      setDeleting(false);
+    }
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h2 className="text-3xl font-bold text-white mb-2">Activity Zones</h2>
-            <p className="text-slate-400">Draw zones to define where motion should trigger alerts.</p>
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Motion alerts"
+        title="Activity zones"
+        description="Mark areas of the camera picture. While the camera viewer is open, live, and motion detection is on, movement inside a saved zone saves a snapshot and sends an alert. Detection compares video frames, so it reacts to any change in the picture (people, pets, shadows or lighting) and does not identify what moved."
+        actions={!drawing && (
+          <Button variant="primary" icon={Plus} onClick={startDrawing} disabled={!live}>New zone</Button>
+        )}
+      />
+
+      {!live && (
+        <div role="status" className="callout callout-info">
+          <Radio aria-hidden="true" />
+          <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p>
+              {cameraStatus === CAMERA_STATUS.CONNECTING
+                ? 'Connecting to the camera. Zones are drawn over the live picture, so drawing starts once the camera is live.'
+                : 'The camera is not live, so there is no picture to draw on. Start broadcasting from a device with a camera, then return here.'}
+            </p>
+            {onNavigate && <Button size="sm" onClick={() => onNavigate('broadcast')}>Open Broadcast</Button>}
           </div>
-          <div className="flex gap-4">
-               {/* Controls */}
-               {isDrawing ? (
-                   <div className="flex items-center gap-2 bg-slate-800 p-2 rounded-lg border border-slate-700">
-                        <input 
-                            type="text" 
-                            placeholder="Zone Name" 
-                            className="bg-slate-900 border border-slate-700 text-white px-3 py-1 rounded outline-none w-40 text-sm"
-                            value={zoneName}
-                            onChange={(e) => setZoneName(e.target.value)}
-                        />
-                        <button 
-                            onClick={() => setPoints(points.slice(0, -1))}
-                            className="p-1 hover:bg-slate-700 rounded text-slate-300"
-                            title="Undo Point"
-                        >
-                            <Undo size={18} />
-                        </button>
-                        <button 
-                            onClick={handleSave}
-                            className="flex items-center gap-1 bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded text-sm font-bold"
-                        >
-                            <Save size={14} /> Save
-                        </button>
-                         <button 
-                            onClick={() => { setIsDrawing(false); setPoints([]); }}
-                            className="p-1 hover:bg-slate-700 rounded text-red-400 ml-1"
-                            title="Cancel"
-                        >
-                            <Trash2 size={18} />
-                        </button>
-                   </div>
-               ) : (
-                   <button 
-                        onClick={() => setIsDrawing(true)}
-                        className="flex items-center gap-2 bg-primary-DEFAULT hover:bg-primary-hover text-white px-4 py-2 rounded-lg font-bold transition-colors"
-                   >
-                       <Plus size={18} /> New Zone
-                   </button>
-               )}
-          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface p-3.5 shadow-sm">
+        <div className="flex items-center gap-2.5">
+          <Camera className="size-4 text-accent" aria-hidden="true" />
+          <label htmlFor="zone-camera-select" className="text-small font-medium text-fg">Active camera:</label>
+          <select
+            id="zone-camera-select"
+            className="select select-sm min-w-[200px]"
+            value={selectedCameraId}
+            onChange={(e) => setSelectedCameraId(e.target.value)}
+            disabled={drawing}
+          >
+            {cameras.length === 0 ? (
+              <option value={BROADCASTER_ID}>{BROADCASTER_LABEL}</option>
+            ) : (
+              cameras.map((cam) => (
+                <option key={cam.id} value={cam.id}>
+                  {cam.name ? `Camera: ${cam.name}` : cameraLabel(cam.id)}
+                </option>
+              ))
+            )}
+          </select>
+        </div>
+        <p className="text-xs text-fg-muted">
+          Drawing and previewing for <strong className="text-fg">{selectedCamera?.name || cameraLabel(selectedCameraId)}</strong>
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Main Visual Editor */}
-          <div className="lg:col-span-2">
-               <div className="bg-black rounded-xl border border-slate-700 overflow-hidden relative aspect-video group">
-                   {/* Background Image (Placeholder or Real Snap) */}
-                   <div 
-                        className="absolute inset-0 bg-slate-900 bg-[url('https://images.unsplash.com/photo-1557597774-9d273605dfa9?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-50"
-                        style={{ pointerEvents: 'none' }}   
-                   ></div>
-                   
-                   {/* Drawing Canvas */}
-                   <canvas
-                        ref={canvasRef}
-                        width={800}
-                        height={450}
-                        onClick={handleCanvasClick}
-                        className={`absolute inset-0 w-full h-full ${isDrawing ? 'cursor-crosshair' : 'cursor-default'}`}
-                   />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
+        <div className="min-w-0 space-y-4">
+          <ZoneStage
+            zones={zones || []}
+            cameraId={selectedCameraId}
+            cameraName={selectedCamera?.name}
+            drawing={drawing}
+            points={points}
+            onAddPoint={addPoint}
+            onUndo={undo}
+            onStatusChange={setCameraStatus}
+            describedBy="zone-instructions"
+          />
+          <ul className="flex flex-wrap gap-x-5 gap-y-2 text-small text-fg-muted" aria-label="Legend">
+            <li className="flex items-center gap-2"><span className="size-3.5 rounded-sm border-2 border-success bg-success-soft" aria-hidden="true" />Saved zone (solid green outline)</li>
+            <li className="flex items-center gap-2"><span className="size-3.5 rounded-sm border-2 border-dashed border-accent bg-accent-soft" aria-hidden="true" />Draft zone (dashed blue outline)</li>
+          </ul>
+        </div>
 
-                   {/* Camera Selector (Overlay) */}
-                   <div className="absolute top-4 left-4">
-                       <select 
-                            value={selectedCamera}
-                            onChange={(e) => setSelectedCamera(e.target.value)}
-                            className="bg-black/50 backdrop-blur text-white border border-white/20 rounded-lg px-3 py-1.5 text-sm outline-none"
-                       >
-                           <option value="mobile">CAM-MOBILE (Live)</option>
-                           <option value="cam2">CAM-02 (Kitchen)</option>
-                           <option value="cam3">CAM-03 (Garage)</option>
-                       </select>
-                   </div>
+        <div className="min-w-0 space-y-6">
+          {drawing && (
+            <form onSubmit={handleSave} noValidate className="card card-body space-y-4" aria-labelledby="draft-heading">
+              <h2 id="draft-heading" className="section-title flex items-center gap-2"><Hexagon className="size-[1.125rem] text-accent" aria-hidden="true" />New zone</h2>
+              <p id="zone-instructions" className="text-small text-fg-muted">{INSTRUCTIONS}</p>
 
-                   {isDrawing && points.length === 0 && (
-                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                           <div className="bg-black/70 backdrop-blur text-white px-4 py-2 rounded-lg shadow-xl flex items-center gap-2 animate-bounce">
-                               <MousePointer2 size={16} /> Click to place points
-                           </div>
-                       </div>
-                   )}
-               </div>
-               
-               <div className="mt-4 flex gap-4 text-sm text-slate-400">
-                    <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 bg-green-500/20 border border-green-500 rounded-sm"></div>
-                        <span>Active Zone</span>
-                    </div>
-                     <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 bg-blue-500/20 border border-blue-500 rounded-sm"></div>
-                        <span>Draft Zone</span>
-                    </div>
-               </div>
-          </div>
+              <Field label="Zone name" error={submitted ? errors.name : undefined}>
+                <input ref={nameRef} type="text" className="input" value={name} maxLength={MAX_NAME_LENGTH + 20} onChange={(e) => setName(e.target.value)} placeholder="e.g. Front door" autoComplete="off" />
+              </Field>
 
-          {/* Zones List */}
-          <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 h-fit">
-              <h3 className="font-bold text-white mb-4 flex items-center gap-2">
-                  <Camera size={18} className="text-primary-DEFAULT" /> 
-                  Configured Zones
-              </h3>
-              
-              {zones.length === 0 ? (
-                  <p className="text-slate-500 text-sm text-center py-8">No zones configured yet.</p>
-              ) : (
-                  <div className="space-y-3">
-                      {zones.map(zone => (
-                          <div key={zone.id} className="bg-slate-900 rounded-lg p-3 border border-slate-700 flex justify-between items-center group hover:border-slate-500 transition-colors">
-                              <div>
-                                  <h4 className="font-medium text-white text-sm">{zone.name}</h4>
-                                  <p className="text-xs text-slate-500">{zone.camera_id}</p>
-                              </div>
-                              <button 
-                                onClick={() => handleDelete(zone.id)}
-                                className="text-slate-500 hover:text-red-400 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                              >
-                                  <Trash2 size={16} />
-                              </button>
-                          </div>
-                      ))}
-                  </div>
+              <div>
+                <p className="text-small font-medium text-fg">
+                  Corners placed: <span className="font-mono">{points.length}</span>
+                  <span className="font-normal text-fg-subtle"> (at least {MIN_POINTS})</span>
+                </p>
+                {submitted && errors.points && <p role="alert" className="field-error">{errors.points}</p>}
+                {!live && <p role="status" className="meta-text mt-1.5">The camera is not live. Your corners are kept, but you can only add more once it is live again.</p>}
+              </div>
+
+              {saveError && (
+                <div role="alert" className="callout callout-danger"><AlertTriangle aria-hidden="true" /><p>The zone was not saved: {saveError} Your drawing is still here.</p></div>
               )}
-          </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" variant="primary" icon={Save} loading={saving}>{saving ? 'Saving…' : 'Save zone'}</Button>
+                <Button icon={Undo2} onClick={undo} disabled={points.length === 0 || saving}>Undo corner</Button>
+                <Button variant="ghost" icon={X} onClick={stopDrawing} disabled={saving}>Cancel</Button>
+              </div>
+              <p className="sr-only" role="status" aria-live="polite">{announce}</p>
+            </form>
+          )}
+
+          <section className="card card-body" aria-labelledby="zones-heading">
+            <h2 id="zones-heading" ref={headingRef} tabIndex={-1} className="section-title mb-4 flex items-center gap-2 outline-none">
+              <MapPinned className="size-[1.125rem] text-accent" aria-hidden="true" />
+              Saved zones
+              {zones && <span className="badge badge-neutral font-mono">{zones.length}</span>}
+            </h2>
+
+            {zonesRes.loading && (
+              <div role="status">
+                <span className="sr-only">Loading zones…</span>
+                <div className="space-y-3" aria-hidden="true">
+                  {[0, 1].map((i) => <div key={i} className="h-14 animate-pulse rounded-control bg-surface-sunken" />)}
+                </div>
+              </div>
+            )}
+
+            {!zonesRes.loading && zonesRes.error && !zones && (
+              <EmptyState
+                tone="error" icon={AlertTriangle} className="!px-4 !py-8"
+                title="Zones could not be loaded"
+                description={zonesRes.error}
+                action={<Button icon={RefreshCw} onClick={zonesRes.reload}>Try again</Button>}
+              />
+            )}
+
+            {zones && zonesRes.error && (
+              <div role="alert" className="callout callout-warning mb-4">
+                <AlertTriangle aria-hidden="true" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <p>Could not refresh zones: {zonesRes.error} Showing the last list that loaded.</p>
+                  <Button size="sm" icon={RefreshCw} onClick={zonesRes.reload} loading={zonesRes.refreshing}>Try again</Button>
+                </div>
+              </div>
+            )}
+
+            {zones && zones.length === 0 && !zonesRes.error && (
+              <div className="py-6 text-center">
+                <p className="text-small font-medium text-fg">No zones saved yet</p>
+                <p className="mx-auto mt-1 max-w-xs text-small text-fg-muted">
+                  Until you save a zone, motion anywhere in the camera view raises an alert. Choose New zone to draw one and limit alerts to that area.
+                </p>
+              </div>
+            )}
+
+            {zones && zones.length > 0 && (
+              <ul className="space-y-3">
+                {zones.map((zone) => {
+                  const pts = parseCoordinates(zone.coordinates_json);
+                  const created = formatDateTime(zone.created_at);
+                  return (
+                    <li key={zone.id} className="flex items-center justify-between gap-3 rounded-control border border-border bg-surface-sunken p-3">
+                      <div className="min-w-0">
+                        <h3 className="break-words text-small font-semibold text-fg [overflow-wrap:anywhere]">{zone.name}</h3>
+                        <p className="meta-text mt-0.5">{cameras.find((c) => String(c.id) === String(zone.camera_id))?.name || cameraLabel(zone.camera_id)}</p>
+                        <p className="meta-text">
+                          {pts ? `${pts.length} corners` : 'Shape unreadable'}{created ? ` · ${created}` : ''}
+                        </p>
+                      </div>
+                      <Button variant="danger-subtle" size="sm" iconOnly icon={Trash2} onClick={() => openDelete(zone)} aria-label={`Delete zone ${zone.name}`} title="Delete zone" />
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        </div>
       </div>
+
+      {confirmZone && (
+        <ConfirmDialog
+          title={`Delete zone “${confirmZone.name}”?`}
+          confirmLabel="Delete zone"
+          busy={deleting}
+          error={deleteError}
+          onConfirm={handleDelete}
+          onCancel={() => setConfirmZone(null)}
+        >
+          <p>This removes the saved zone. Movement in that area will no longer raise a zone alert unless another zone covers it.</p>
+        </ConfirmDialog>
+      )}
     </div>
   );
 };

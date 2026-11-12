@@ -1,0 +1,134 @@
+/*
+ * myCam design tokens  (single source of truth)
+ * ---------------------------------------------------------------------------
+ * Tailwind v4 reads this @theme block directly, so every token below is also a
+ * utility: --color-surface -> bg-surface / text-surface / border-surface,
+ * --radius-card -> rounded-card, --text-title -> text-title, and so on.
+ * Components should consume these names; do not hard-code hex values in JSX.
+ * (tailwind.config.js was removed: Tailwind v4 does not read it.)
+ */
+@theme {
+  /* ---- Colour: surfaces & text (myCloud / Landing palette) ---------------- */
+  --color-background: #060810;        /* deep midnight space background (myCloud) */
+  --color-surface: #0a0e1a;           /* cards, panels, sidebar */
+  --color-surface-hover: #12182b;     /* hovered / selected surfaces */
+  --color-surface-sunken: #070a13;    /* inputs, video wells, recessed areas */
+  --color-border: #1a2234;            /* dividers, card borders */
+  --color-border-strong: #27364f;     /* control outlines */
+
+  --color-fg: #eef2ff;                /* primary text (myCloud text-primary) */
+  --color-fg-muted: #7c8ba8;          /* secondary text (myCloud text-secondary) */
+  --color-fg-subtle: #54637d;         /* metadata, placeholders */
+  --color-fg-disabled: #3a4659;       /* disabled text */
+  --color-disabled-bg: #0d121f;
+
+  /* ---- Colour: action & status (myCloud electric blue) ------------------- */
+  --color-accent: #3b82f6;            /* myCloud electric blue */
+  --color-accent-hover: #60a5fa;
+  --color-accent-pressed: #2563eb;
+  --color-accent-fg: #ffffff;         /* text on accent fills */
+  --color-accent-soft: rgba(59, 130, 246, 0.14);
+
+  --color-success: #10b981;           /* emerald */
+  --color-success-soft: rgba(16, 185, 129, 0.14);
+  --color-warning: #f59e0b;           /* amber */
+  --color-warning-soft: rgba(245, 158, 11, 0.14);
+  --color-danger: #ef4444;            /* red */
+  --color-danger-soft: rgba(239, 68, 68, 0.14);
+  --color-danger-solid: #dc2626;
+
+  --color-focus: #3b82f6;             /* keyboard focus ring */
+  --color-overlay: rgba(4, 7, 14, 0.82);/* modal backdrop */
+
+  /* ---- Typography -------------------------------------------------------- */
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Plus Jakarta Sans", "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --text-title: 1.5rem;               /* page title            */
+  --text-title--line-height: 1.25;
+  --text-heading: 1.125rem;           /* section / card heading */
+  --text-heading--line-height: 1.4;
+  --text-body: 0.9375rem;             /* 15px default content   */
+  --text-body--line-height: 1.55;
+  --text-small: 0.8125rem;            /* 13px supporting text   */
+  --text-small--line-height: 1.5;
+  /* text-xs (12px) is the floor: metadata, badges, captions */
+
+  /* ---- Radii ------------------------------------------------------------- */
+  --radius-control: 0.625rem;         /* buttons, inputs        */
+  --radius-card: 0.875rem;            /* cards, panels          */
+  --radius-modal: 1.125rem;           /* dialogs                */
+
+  /* ---- Elevation --------------------------------------------------------- */
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 16px rgb(0 0 0 / 0.25);
+  --shadow-overlay: 0 24px 64px rgb(0 0 0 / 0.55);
+
+  /* ---- Motion ------------------------------------------------------------ */
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-fade-in: fade-in 0.2s var(--ease-standard) both;
+  --animate-fade-up: fade-up 0.3s var(--ease-standard) both;
+  --animate-slide-up: slide-up 0.25s var(--ease-standard) both;
+  --animate-pulse-dot: pulse-dot 2s ease-in-out infinite;
+  --animate-spin-slow: spin 3s linear infinite;
+
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes slide-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+}
+
+/* Non-utility tokens: spacing rhythm, layering, durations. */
+:root {
+  color-scheme: dark;
+
+  /* Spacing scale (Tailwind's 4px grid). Use these steps: 1 2 3 4 6 8 12 */
+  --space-page: 1rem;                 /* page padding on small screens; 1.5rem md, 2rem lg */
+  --space-card: 1.25rem;              /* card padding */
+  --space-section: 1.5rem;            /* gap between sections */
+  --space-field: 1rem;                /* gap between form fields */
+
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+
+  --z-sticky: 40;
+  --z-dropdown: 50;
+  --z-modal: 100;
+  --z-toast: 200;
+}
+
+/* --------------------------------------------------------------------------
+   Light Theme Tokens Override
+   -------------------------------------------------------------------------- */
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Surfaces & text (clean crisp light palette) */
+  --color-background: #f8fafc;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f1f5f9;
+  --color-surface-sunken: #edf2f7;
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+
+  --color-fg: #0f172a;
+  --color-fg-muted: #475569;
+  --color-fg-subtle: #64748b;
+  --color-fg-disabled: #94a3b8;
+  --color-disabled-bg: #f1f5f9;
+
+  /* Action & status */
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-accent-pressed: #1e40af;
+  --color-accent-fg: #ffffff;
+  --color-accent-soft: rgba(37, 99, 235, 0.08);
+
+  --color-focus: #2563eb;
+  --color-overlay: rgba(15, 23, 42, 0.55);
+
+  --shadow-raised: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.05);
+  --shadow-overlay: 0 16px 40px rgba(0, 0, 0, 0.14);
+}
+

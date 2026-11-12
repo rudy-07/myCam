@@ -1,78 +1,151 @@
-import React, { useRef, useEffect } from 'react';
-import { X, Play, Pause, Volume2, VolumeX, Maximize2 } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Film, Loader2, AlertTriangle, FileX, Download, Share2, RotateCcw, ShieldCheck } from 'lucide-react';
+import { Modal, Button, StatusBadge } from '../ui';
+import useAuthedObjectUrl from '../../hooks/useAuthedObjectUrl';
+import { MEDIA_STATE, formatDateTime, formatDuration, formatFileSize } from '../../lib/recordingMedia';
 
-const VideoPlayerModal = ({ recording, onClose }) => {
+const describeMediaError = (error) => {
+  switch (error?.code) {
+    case 1: return 'Playback was cancelled.';
+    case 2: return 'A network error interrupted loading the video.';
+    case 3: return 'The browser could not decode this video file.';
+    case 4: return 'The video file is missing or its format is not supported by this browser.';
+    default: return 'The video could not be played.';
+  }
+};
+
+const Notice = ({ icon, spin, tone = 'neutral', title, children, role = 'status', action }) => (
+  <div className="max-w-sm px-6 py-8 text-center" role={role}>
+    <div className={`mx-auto mb-3 flex size-14 items-center justify-center rounded-full border bg-surface ${tone === 'warning' ? 'border-warning/30' : tone === 'danger' ? 'border-danger/30' : 'border-border'}`}>
+      {React.createElement(icon, {
+        className: `size-6 ${tone === 'warning' ? 'text-warning' : tone === 'danger' ? 'text-danger' : 'text-fg-subtle'} ${spin ? 'animate-spin' : ''}`,
+        'aria-hidden': true,
+      })}
+    </div>
+    <p className="text-body font-semibold text-fg">{title}</p>
+    <p className="mt-1 text-small text-fg-muted">{children}</p>
+    {action && <div className="mt-4 flex justify-center">{action}</div>}
+  </div>
+);
+
+const Detail = ({ label, children }) => (
+  <div className="min-w-0">
+    <dt className="meta-text">{label}</dt>
+    <dd className="mt-0.5 break-words text-small text-fg [overflow-wrap:anywhere]">{children}</dd>
+  </div>
+);
+
+/**
+ * Plays a real recording. The <video> element is mounted only when `mediaState`
+ * is AVAILABLE (the server was confirmed to supply the file). CHECKING and
+ * UNAVAILABLE both render a status panel instead, never a player.
+ */
+const VideoPlayerModal = ({
+  recording, url, mediaState = MEDIA_STATE.CHECKING, onClose,
+  onDownload, downloading, downloadDisabledReason, onShare, shareDisabledReason, onVerify, verifying = false,
+}) => {
   const videoRef = useRef(null);
+  const [loaded, setLoaded] = useState(false);
+  const [errorText, setErrorText] = useState('');
+  const [attempt, setAttempt] = useState(0);
 
-  // Auto-play on open
-  useEffect(() => {
-    if (videoRef.current) {
-        videoRef.current.play().catch(e => console.log("Autoplay blocked", e));
-    }
-  }, []);
+  const canPlay = Boolean(url) && mediaState === MEDIA_STATE.AVAILABLE;
+  // The backend needs the Authorization header, which <video src> cannot send: play a blob fetched with the session token.
+  const media = useAuthedObjectUrl(url, canPlay && Boolean(recording), attempt);
 
   if (!recording) return null;
 
+  const shownError = errorText || media.error;
+  const date = formatDateTime(recording.created_at);
+  const duration = formatDuration(recording.duration);
+  const size = formatFileSize(recording.file_size_bytes);
+  const badge = mediaState === MEDIA_STATE.AVAILABLE
+    ? <StatusBadge status="success" label="Video found" />
+    : mediaState === MEDIA_STATE.UNAVAILABLE
+      ? <StatusBadge status="warning" label="Video unavailable" />
+      : <StatusBadge status="connecting" label="Checking file" />;
+  const helper = [downloadDisabledReason, shareDisabledReason].filter(Boolean).join(' ');
+
+  const retry = () => { setErrorText(''); setLoaded(false); setAttempt((n) => n + 1); };
+
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in">
-      <div className="relative bg-slate-900/80 backdrop-blur-xl rounded-3xl w-full max-w-5xl overflow-hidden border border-white/10 shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)] flex flex-col max-h-[90vh]">
-        
-        {/* Header */}
-        <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/5">
-            <div className="flex items-center gap-3">
-                <div className="bg-primary-DEFAULT w-2.5 h-2.5 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)]"></div>
-                <div>
-                    <h3 className="font-bold text-white text-lg tracking-wide">{recording.filename || 'Recording'}</h3>
-                    <p className="text-xs text-slate-400">
-                        {recording.camera_id} • {new Date(recording.created_at).toLocaleString()}
-                    </p>
-                </div>
-            </div>
-            <button 
-                onClick={onClose}
-                className="p-2 hover:bg-white/10 rounded-xl text-white/50 hover:text-white transition-all duration-300"
+    <Modal
+      title={recording.camera_id ? `Recording from ${recording.camera_id}` : 'Recording'}
+      subtitle={date || 'Capture time unknown'}
+      headerExtra={badge}
+      closeLabel="Close player"
+      onClose={onClose}
+      footer={(
+        <>
+          {helper && <p className="meta-text min-w-0 basis-full sm:basis-0 sm:flex-1" role="status">{helper}</p>}
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
+            <Button size="sm" variant="secondary" icon={ShieldCheck} onClick={onVerify} loading={verifying} disabled={verifying} title="Check whether the file still exists in storage">
+              {verifying ? 'Checking…' : 'Check file'}
+            </Button>
+            <Button
+              size="sm" icon={Download} onClick={onDownload} loading={downloading}
+              disabled={Boolean(downloadDisabledReason)}
+              title={downloadDisabledReason || 'Download this recording'}
             >
-                <X className="w-6 h-6" />
-            </button>
-        </div>
-
-        {/* Video Area */}
-        <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden bg-[url('https://images.unsplash.com/photo-1557597774-9d273605dfa9?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center">
-             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm"></div>
-             
-             {/* Mock Video Element or Real one if URL exists */}
-             {recording.url ? (
-                 <video 
-                    ref={videoRef}
-                    src={recording.url} 
-                    controls 
-                    className="w-full h-full object-contain relative z-10"
-                 />
-             ) : (
-                <div className="text-center relative z-10 p-8">
-                    <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-600">
-                        <Play className="w-8 h-8 text-slate-400 ml-1" />
-                    </div>
-                    <p className="text-xl font-bold text-white mb-2">Video Source Unavailable</p>
-                    <p className="text-slate-400 max-w-md mx-auto">
-                        This is a mock recording entry. In a real application, this would stream the video file from storage.
-                    </p>
-                </div>
-             )}
-        </div>
-
-        {/* Footer Controls (Mock if no real video control needed beyond native) */}
-        <div className="p-4 bg-white/5 border-t border-white/5 flex justify-between items-center text-sm text-slate-400 backdrop-blur-md">
-            <span>Duration: {recording.duration}</span>
-            <div className="flex gap-2">
-                 <button className="hover:text-white transition-colors hover:bg-white/10 px-3 py-1 rounded-lg">Download Clip</button>
-                 <span className="text-slate-600 py-1">|</span>
-                 <button className="hover:text-white transition-colors hover:bg-white/10 px-3 py-1 rounded-lg">Share</button>
-            </div>
-        </div>
-
+              {downloading ? 'Downloading…' : 'Download'}
+            </Button>
+            <Button
+              size="sm" icon={Share2} onClick={onShare}
+              disabled={Boolean(shareDisabledReason)}
+              title={shareDisabledReason || 'Share this recording'}
+            >
+              Share
+            </Button>
+          </div>
+        </>
+      )}
+    >
+      {/* Fixed 16:9 well: no layout shift when media loads; portrait video is letterboxed, never cropped */}
+      <div className="relative flex aspect-video max-h-[62dvh] w-full items-center justify-center overflow-hidden bg-surface-sunken">
+        {canPlay && !shownError && media.objectUrl && (
+          <video
+            key={attempt}
+            ref={videoRef}
+            src={media.objectUrl}
+            controls
+            playsInline
+            preload="metadata"
+            aria-label={`Recording ${recording.filename || ''}`.trim()}
+            onLoadedData={() => setLoaded(true)}
+            onError={() => setErrorText(describeMediaError(videoRef.current?.error))}
+            className="size-full object-contain"
+          />
+        )}
+        {canPlay && !shownError && (!media.objectUrl || !loaded) && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-surface-sunken/70">
+            <Notice icon={Loader2} spin title="Loading recording">Waiting for the server to send the video.</Notice>
+          </div>
+        )}
+        {canPlay && shownError && (
+          <Notice
+            icon={AlertTriangle} tone="danger" role="alert" title="Playback failed"
+            action={<Button size="sm" icon={RotateCcw} onClick={retry}>Try again</Button>}
+          >
+            {shownError}
+          </Notice>
+        )}
+        {!canPlay && mediaState === MEDIA_STATE.CHECKING && (
+          <Notice icon={Loader2} spin title="Checking video file">Confirming that the server can supply this recording.</Notice>
+        )}
+        {!canPlay && mediaState !== MEDIA_STATE.CHECKING && (
+          <Notice icon={mediaState === MEDIA_STATE.UNAVAILABLE ? FileX : Film} tone="warning" title="Video unavailable">
+            This recording entry exists, but the server cannot supply its video file.
+          </Notice>
+        )}
       </div>
-    </div>
+
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border px-5 py-4 sm:grid-cols-4">
+        <Detail label="File name">{recording.filename || 'Unknown'}</Detail>
+        <Detail label="Recorded">{date || 'Unknown'}</Detail>
+        <Detail label="Duration">{duration || 'Not recorded'}</Detail>
+        <Detail label="File size">{size || 'Not reported'}</Detail>
+      </dl>
+    </Modal>
   );
 };
 

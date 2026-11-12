@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
-import { X, CheckCircle, AlertCircle, Info } from 'lucide-react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import { X, CheckCircle2, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 
 const ToastContext = createContext(null);
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useToast = () => {
     const context = useContext(ToastContext);
     if (!context) {
@@ -11,51 +12,72 @@ export const useToast = () => {
     return context;
 };
 
+// Errors stay a little longer so they can be read. Callers may pass an explicit duration.
+const DEFAULT_DURATION = { success: 4000, info: 4000, warning: 6000, error: 6000 };
+
+const TYPE_META = {
+    success: { cls: 'toast-success', Icon: CheckCircle2, color: 'text-success', role: 'status' },
+    error: { cls: 'toast-error', Icon: AlertCircle, color: 'text-danger', role: 'alert' },
+    warning: { cls: 'toast-warning', Icon: AlertTriangle, color: 'text-warning', role: 'status' },
+    info: { cls: 'toast-info', Icon: Info, color: 'text-accent', role: 'status' },
+};
+
+const MAX_VISIBLE = 4;
+
 export const ToastProvider = ({ children }) => {
     const [toasts, setToasts] = useState([]);
+    const timers = useRef({});
 
-    const addToast = useCallback((message, type = 'info', duration = 3000) => {
-        const id = Date.now() + Math.random();
-        setToasts(prev => [...prev, { id, message, type, duration }]);
-
-        if (duration > 0) {
-            setTimeout(() => {
-                removeToast(id);
-            }, duration);
-        }
+    useEffect(() => () => {
+        Object.values(timers.current).forEach((timer) => clearTimeout(timer));
+        timers.current = {};
     }, []);
 
     const removeToast = useCallback((id) => {
+        clearTimeout(timers.current[id]);
+        delete timers.current[id];
         setToasts(prev => prev.filter(toast => toast.id !== id));
     }, []);
+
+    const addToast = useCallback((message, type = 'info', duration) => {
+        const kind = TYPE_META[type] ? type : 'info';
+        const ms = duration ?? DEFAULT_DURATION[kind];
+        const id = Date.now() + Math.random();
+        
+        setToasts((prev) => {
+            if (prev.some((t) => t.message === message && t.type === kind)) {
+                return prev;
+            }
+            if (ms > 0) {
+                timers.current[id] = setTimeout(() => removeToast(id), ms);
+            }
+            return [...prev, { id, message, type: kind, duration: ms }].slice(-MAX_VISIBLE);
+        });
+
+        return id;
+    }, [removeToast]);
 
     return (
         <ToastContext.Provider value={{ addToast, removeToast }}>
             {children}
-            <div className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-none">
-                {toasts.map(toast => (
-                    <div 
-                        key={toast.id}
-                        className={`pointer-events-auto flex items-center gap-3 min-w-[300px] max-w-md p-4 rounded-xl shadow-2xl border backdrop-blur-md animate-slide-up transition-all ${
-                            toast.type === 'success' ? 'bg-green-900/80 border-green-700 text-green-100' :
-                            toast.type === 'error' ? 'bg-red-900/80 border-red-700 text-red-100' :
-                            'bg-slate-800/90 border-slate-700 text-white'
-                        }`}
-                    >
-                        {toast.type === 'success' && <CheckCircle className="w-5 h-5 text-green-400" />}
-                        {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-red-400" />}
-                        {toast.type === 'info' && <Info className="w-5 h-5 text-blue-400" />}
-                        
-                        <p className="flex-1 text-sm font-medium">{toast.message}</p>
-                        
-                        <button 
-                            onClick={() => removeToast(toast.id)}
-                            className="p-1 hover:bg-white/10 rounded-full transition-colors"
-                        >
-                            <X className="w-4 h-4 opacity-70" />
-                        </button>
-                    </div>
-                ))}
+            <div className="toast-region" aria-label="Status messages" role="region">
+                {toasts.map(toast => {
+                    const { cls, Icon, color, role } = TYPE_META[toast.type];
+                    return (
+                        <div key={toast.id} role={role} className={`toast ${cls}`}>
+                            <Icon className={`mt-0.5 size-4 shrink-0 ${color}`} aria-hidden="true" />
+                            <p className="min-w-0 flex-1 break-words">{toast.message}</p>
+                            <button
+                                type="button"
+                                onClick={() => removeToast(toast.id)}
+                                className="btn btn-ghost btn-icon btn-sm -my-1 -mr-1.5 shrink-0"
+                                aria-label="Dismiss notification"
+                            >
+                                <X className="size-4" aria-hidden="true" />
+                            </button>
+                        </div>
+                    );
+                })}
             </div>
         </ToastContext.Provider>
     );

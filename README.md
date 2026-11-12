@@ -1,4 +1,16 @@
-# myCam - Real-Time WebRTC Camera Security & Video Surveillance Platform
+<div align="center">
+
+<img src="./assets/mycam_brand_lockup.png" alt="myCam Banner" width="100%" />
+
+<br/><br/>
+
+<img src="./assets/mycam_logo.png" alt="myCam Logo" width="120" height="120" />
+
+# myCam
+
+### *Real-Time WebRTC Camera Security & Video Surveillance Platform*
+
+</div>
 
 [![React](https://img.shields.io/badge/React-19.2.0-blue?style=flat-square&logo=react)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-7.2.4-646CFF?style=flat-square&logo=vite)](https://vitejs.dev/)

@@ -1,79 +1,134 @@
-import React, { useState } from 'react';
-import { Camera, Video, Settings, Activity, Users, LogOut, ChevronLeft, ChevronRight } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useEffect, useRef } from 'react';
+import { LogOut, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import logoIcon from '../../assets/mycam_no_text.png';
+import { NAV_GROUPS } from './navConfig';
 
-const Sidebar = ({ isCollapsed, onToggle, onLogout, activeTab, onTabChange }) => {
-  const menuItems = [
-    { id: 'cameras', icon: Camera, label: 'Cameras' },
-    { id: 'recordings', icon: Video, label: 'Recordings' },
-    { id: 'activity', icon: Activity, label: 'Activity Zones' },
-    { id: 'broadcast', icon: Users, label: 'Broadcast' },
-    { id: 'settings', icon: Settings, label: 'Settings' },
-  ];
+/**
+ * One sidebar, two presentations:
+ *  - desktop (md+): static column, expanded 240px or collapsed 76px rail
+ *  - mobile: off-canvas drawer with backdrop. While closed it is `inert`, so
+ *    nothing inside can be focused or read by assistive tech.
+ */
+const Sidebar = ({ isDesktop, isCollapsed, onToggle, mobileOpen, onMobileClose, onLogout, activeTab, onTabChange }) => {
+  const asideRef = useRef(null);
+  const closeRef = useRef(null);
+  const drawerOpen = !isDesktop && mobileOpen;
+  const collapsed = isDesktop && isCollapsed; // the drawer is always full width
+
+  // Drawer behaviour: focus in, Escape, Tab containment, scroll lock.
+  useEffect(() => {
+    if (!drawerOpen) return undefined;
+    closeRef.current?.focus();
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => {
+      if (e.key === 'Escape') { onMobileClose(); return; }
+      if (e.key !== 'Tab') return;
+      const items = asideRef.current?.querySelectorAll('button:not([disabled]), a[href]');
+      if (!items?.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [drawerOpen, onMobileClose]);
+
+  const select = (id) => { onTabChange(id); if (!isDesktop) onMobileClose(); };
+
+  const positioning = isDesktop
+    ? 'relative z-30 h-full shrink-0'
+    : `fixed inset-y-0 left-0 z-[60] w-[min(18rem,85vw)] transition-transform duration-200 ${drawerOpen ? 'translate-x-0 shadow-overlay' : '-translate-x-full'}`;
 
   return (
-    <motion.div 
-        animate={{ width: isCollapsed ? 80 : 260 }}
-        className="h-screen bg-slate-900 border-r border-slate-800 flex flex-col relative z-20"
-    >
-      {/* Header */}
-      <div className="h-20 flex items-center justify-center border-b border-slate-800 relative">
-        <div className="flex items-center gap-3">
-            <div className="bg-primary-DEFAULT p-2 rounded-lg">
-                <Camera className="w-6 h-6 text-white" />
-            </div>
-            {!isCollapsed && (
-                <motion.span 
-                    initial={{ opacity: 0 }} 
-                    animate={{ opacity: 1 }} 
-                    className="font-bold text-xl text-white tracking-tight cursor-pointer"
-                    onClick={() => onTabChange('cameras')}
-                >
-                    myCam
-                </motion.span>
+    <>
+      {drawerOpen && (
+        <div className="fixed inset-0 z-[55] bg-overlay animate-fade-in" onClick={onMobileClose} aria-hidden="true" />
+      )}
+      <aside
+        id="app-sidebar"
+        ref={asideRef}
+        inert={!isDesktop && !mobileOpen}
+        aria-label="Primary"
+        style={isDesktop ? { width: collapsed ? 76 : 240 } : undefined}
+        className={`flex flex-col border-r border-border bg-surface ${isDesktop ? 'transition-[width] duration-200' : ''} ${positioning}`}
+      >
+        <div className={`flex h-[68px] shrink-0 items-center border-b border-border px-4 ${collapsed ? 'justify-center' : 'justify-between'}`}>
+          <button
+            type="button"
+            onClick={() => select('cameras')}
+            className="flex min-w-0 items-center gap-3 rounded-control"
+            aria-label="myCam, go to Cameras"
+          >
+            <img src={logoIcon} alt="" width="32" height="32" className="size-8 shrink-0 object-contain" />
+            {!collapsed && (
+              <span className="whitespace-nowrap text-heading font-bold tracking-tight text-fg">my<span className="text-accent">Cam</span></span>
             )}
-        </div>
-        
-        {/* Toggle Button */}
-         <button 
-            onClick={onToggle}
-            className="absolute -right-3 top-1/2 -translate-y-1/2 bg-slate-800 border border-slate-700 rounded-full p-1 text-slate-400 hover:text-white transition-colors"
-        >
-            {isCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-         </button>
-      </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 py-8 px-4 space-y-2">
-        {menuItems.map((item) => (
-            <button
-                key={item.id}
-                onClick={() => onTabChange(item.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                    activeTab === item.id 
-                    ? 'bg-primary-DEFAULT shadow-lg shadow-primary-DEFAULT/25 text-white' 
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                } ${isCollapsed ? 'justify-center' : ''}`}
-            >
-                <item.icon className="w-5 h-5" />
-                {!isCollapsed && (
-                    <span className="font-medium">{item.label}</span>
-                )}
+          </button>
+          {!isDesktop && (
+            <button ref={closeRef} type="button" onClick={onMobileClose} className="btn btn-ghost btn-icon btn-sm" aria-label="Close navigation">
+              <X className="size-4" aria-hidden="true" />
             </button>
-        ))}
-      </nav>
+          )}
+        </div>
 
-      {/* Footer / Logout */}
-      <div className="p-4 border-t border-slate-800">
-        <button 
+        <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4" aria-label="Dashboard sections">
+          {NAV_GROUPS.map(({ heading, items }) => (
+            <div key={heading}>
+              {collapsed
+                ? <div className="mx-3 mb-2 border-t border-border first:hidden" aria-hidden="true" />
+                : <p className="mb-2 px-3 text-xs font-medium uppercase tracking-wide text-fg-subtle">{heading}</p>}
+              <ul className="space-y-1">
+                {items.map((item) => (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      onClick={() => select(item.id)}
+                      aria-current={activeTab === item.id ? 'page' : undefined}
+                      aria-label={collapsed ? item.label : undefined}
+                      title={collapsed ? item.label : undefined}
+                      className={`nav-item min-h-11 ${collapsed ? 'justify-center px-0' : ''}`}
+                    >
+                      <item.icon className="size-[18px] shrink-0" aria-hidden="true" />
+                      {!collapsed && <span className="truncate">{item.label}</span>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </nav>
+
+        <div className="shrink-0 space-y-1 border-t border-border p-3">
+          {isDesktop && (
+            <button
+              type="button"
+              onClick={onToggle}
+              className={`nav-item min-h-10 ${collapsed ? 'justify-center px-0' : ''}`}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-expanded={!collapsed}
+              title={collapsed ? 'Expand sidebar' : undefined}
+            >
+              {collapsed ? <ChevronRight className="size-[18px]" aria-hidden="true" /> : <><ChevronLeft className="size-[18px]" aria-hidden="true" /><span>Collapse</span></>}
+            </button>
+          )}
+          <button
+            type="button"
             onClick={onLogout}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors ${isCollapsed ? 'justify-center' : ''}`}
-        >
-            <LogOut className="w-5 h-5" />
-            {!isCollapsed && <span className="font-medium">Logout</span>}
-        </button>
-      </div>
-    </motion.div>
+            aria-label={collapsed ? 'Sign out' : undefined}
+            title={collapsed ? 'Sign out' : undefined}
+            className={`btn btn-danger-subtle btn-block ${collapsed ? 'px-0' : 'justify-start'}`}
+          >
+            <LogOut className="size-4 shrink-0" aria-hidden="true" />
+            {!collapsed && <span>Sign out</span>}
+          </button>
+        </div>
+      </aside>
+    </>
   );
 };
 
